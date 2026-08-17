@@ -1,7 +1,7 @@
 import time
 
 from src.char.AidaqianAxis import AidaqianAxis
-from src.char.BaseChar import BaseChar, CharType, get_default_buff_time
+from src.char.BaseChar import BaseChar, CharType, SwitchPriority, get_default_buff_time
 
 
 class Chisa(AidaqianAxis, BaseChar):
@@ -23,12 +23,19 @@ class Chisa(AidaqianAxis, BaseChar):
         return super().get_buff_time()
 
     def do_perform(self):
-        # 爱达千内置轴（AidaqianAxis）命中队伍时接管；不是该队伍时走原逻辑。
-        if self.axis_state() is not None:
-            return AidaqianAxis.do_perform(self)
+        # 爱达千轴命中时，不轮到自己出手就直接让位；轮到自己完全走原逻辑。
+        state = self.axis_state()
+        if state is not None and not self.axis_is_my_turn(state):
+            return self.switch_next_char()
         if self.is_dps_config():
             return self.do_dps_perform()
         return self.do_support_perform()
+
+    def get_switch_priority(self, current_char=None, has_intro=False, target_low_con=False):
+        state = self.axis_state()
+        if state is not None:
+            return SwitchPriority.MUST if self.axis_is_my_turn(state) else SwitchPriority.NO
+        return super().get_switch_priority(current_char, has_intro, target_low_con)
 
     def do_support_perform(self):
         needs_long_actions = self.has_intro and not self.has_buff()

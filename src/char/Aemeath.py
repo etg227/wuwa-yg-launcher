@@ -1,7 +1,7 @@
 import time
 
 from src.char.AidaqianAxis import AidaqianAxis
-from src.char.BaseChar import BaseChar
+from src.char.BaseChar import BaseChar, SwitchPriority
 
 
 class Aemeath(AidaqianAxis, BaseChar):
@@ -19,10 +19,17 @@ class Aemeath(AidaqianAxis, BaseChar):
     def lib2_available(self):
         return bool(self.task.find_one('aemeath_lib2', threshold=0.7))
 
+    def get_switch_priority(self, current_char=None, has_intro=False, target_low_con=False):
+        state = self.axis_state()
+        if state is not None:
+            return SwitchPriority.MUST if self.axis_is_my_turn(state) else SwitchPriority.NO
+        return super().get_switch_priority(current_char, has_intro, target_low_con)
+
     def do_perform(self):
-        # 爱达千内置轴（AidaqianAxis）命中队伍时接管；不是该队伍时走原逻辑。
-        if AidaqianAxis.axis_state(self) is not None:
-            return AidaqianAxis.do_perform(self)
+        # 爱达千轴命中时，不轮到自己出手就直接让位；轮到自己完全走原逻辑。
+        state = self.axis_state()
+        if state is not None and not self.axis_is_my_turn(state):
+            return self.switch_next_char()
         self.enhance_e_cast_this_turn = False
         self.lib2_cast_this_turn = False
         self.must_cast_lib2_this_turn = self.has_all_buff() and self.has_intro
