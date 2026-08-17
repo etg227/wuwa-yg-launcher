@@ -1,0 +1,4 @@
+interface:
+  display_name: "Wuwa Pilot Characters"
+  short_description: "Create and modify Wuwa Pilot character logic"
+  default_prompt: "Use $wuwa-pilot-characters to create or update a Wuthering Waves character class."

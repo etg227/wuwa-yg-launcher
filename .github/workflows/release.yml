@@ -1,0 +1,323 @@
+name: Windows Release
+run-name: Windows release · ${{ inputs.version || github.ref_name }}
+
+# 0. tag         手动触发时在当前分支创建发布 tag（Actions 创建的 tag 不再触发 push 事件）
+# 1. validate    跑全部测试
+# 2. synchronize 把 deploy.txt 列出的运行时文件同步到更新仓库 wuwa-yg-launcher-update
+# 3. package     只有正式版 tag（vX.Y.Z，不带 -beta）才构建安装包
+# 4. publish     发布 GitHub Release
+# beta tag（v1.0.0-beta.2 这类）只执行 1 和 2，供已安装用户升级，不出安装包。
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '发布 tag（vX.Y.Z），将在当前分支最新提交上创建'
+        required: true
+
+concurrency:
+  group: windows-release-${{ inputs.version || github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+env:
+  PYTHON_VERSION: '3.12'
+  PYTHONIOENCODING: 'UTF-8'
+  PYTHONLEGACYWINDOWSSTDIO: 'UTF-8'
+  BUILD_EXE: 'true'
+  RELEASE_TAG: ${{ inputs.version || github.ref_name }}
+#  USE_RELEASE: 'https://api.github.com/repos/etg227/wuwa_pilot/releases/tags/v1.0.0'
+
+jobs:
+  tag:
+    name: 0 · Ensure release tag
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Create tag on manual dispatch
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          TAG: ${{ inputs.version }}
+        run: |
+          if ! echo "$TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+            echo "无效的发布 tag：$TAG" >&2
+            exit 1
+          fi
+          head_sha="$(git rev-parse HEAD)"
+          if existing="$(git rev-parse "refs/tags/$TAG^{commit}" 2>/dev/null)"; then
+            if [ "$existing" != "$head_sha" ]; then
+              echo "tag $TAG 已存在且指向 $existing，与当前提交 $head_sha 不一致；请换新版本号发布" >&2
+              exit 1
+            fi
+            echo "tag $TAG 已存在且指向当前提交，跳过创建"
+            exit 0
+          fi
+          git tag "$TAG"
+          git push origin "refs/tags/$TAG"
+
+  validate:
+    name: 1 · Validate
+    needs: tag
+    runs-on: windows-latest
+
+    steps:
+      - name: Configure runner
+        shell: pwsh
+        run: |
+          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+          git config --global core.autocrlf false
+          git config --global core.eol lf
+          git config --global user.email "144003800+etg227@users.noreply.github.com"
+          git config --global user.name "etg227"
+
+      - name: Check out source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          submodules: true
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install -r requirements.txt
+          python -m pip install -r requirements-dev.txt
+
+      - name: Prepare release requirements
+        run: python -m ok.update.inline_ok_requirements --tag "$env:RELEASE_TAG"
+
+      - name: Run tests
+        env:
+          GITHUB_TOKEN: ''
+          GH_TOKEN: ''
+          UPDATE_REPO_TOKEN: ''
+          ACTIONS_RUNTIME_TOKEN: ''
+          ACTIONS_ID_TOKEN_REQUEST_TOKEN: ''
+        run: |
+          @(
+            'GITHUB_TOKEN',
+            'GH_TOKEN',
+            'UPDATE_REPO_TOKEN',
+            'ACTIONS_RUNTIME_TOKEN',
+            'ACTIONS_ID_TOKEN_REQUEST_TOKEN'
+          ) | ForEach-Object {
+            Remove-Item "Env:\$_" -ErrorAction SilentlyContinue
+          }
+
+          python run_tests.py
+
+  synchronize:
+    name: 2 · Synchronize update repository
+    needs: validate
+    runs-on: windows-latest
+    outputs:
+      is_release: ${{ steps.release_version.outputs.is_release }}
+      start_tag: ${{ steps.sync.outputs.start_tag }}
+      end_tag: ${{ steps.sync.outputs.end_tag }}
+      changes: ${{ steps.sync.outputs.changes_with_asterisk }}
+
+    steps:
+      - name: Configure runner
+        shell: pwsh
+        run: |
+          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+          git config --global core.autocrlf false
+          git config --global core.eol lf
+          git config --global user.email "144003800+etg227@users.noreply.github.com"
+          git config --global user.name "etg227"
+
+      - name: Check out source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          submodules: true
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install -r requirements.txt
+          python -m pip install -r requirements-dev.txt
+
+      - name: Prepare release requirements
+        run: python -m ok.update.inline_ok_requirements --tag "$env:RELEASE_TAG"
+
+      - name: Check release version
+        id: release_version
+        if: env.BUILD_EXE == 'true'
+        shell: pwsh
+        run: |
+          $isRelease = $env:RELEASE_TAG -match '^v?\d+\.\d+\.\d+$'
+          "is_release=$($isRelease.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
+          Write-Host "Release version: $isRelease"
+
+      # partial-sync-repo intentionally moves every other tag that points at the
+      # same source commit. Refuse the sync when one of those tags is an already
+      # published version, so a release tag in wuwa-yg-launcher-update stays immutable.
+      - name: Protect published update tags
+        shell: pwsh
+        run: |
+          $sourceCommit = git rev-parse "$env:RELEASE_TAG^{commit}"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Cannot resolve release tag $env:RELEASE_TAG"
+          }
+
+          $publishedVersionPattern = '^v?\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$'
+          $coTags = @(git tag --points-at $sourceCommit) |
+            Where-Object { $_ -ne $env:RELEASE_TAG -and $_ -match $publishedVersionPattern }
+
+          if ($coTags.Count -eq 0) {
+            Write-Host 'No other published version tag points at this commit.'
+            exit 0
+          }
+
+          $targetTagNames = @(git ls-remote --tags --refs https://github.com/etg227/wuwa-yg-launcher-update.git) |
+            ForEach-Object { ($_ -split "`t", 2)[1] -replace '^refs/tags/', '' }
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Cannot inspect tags in wuwa-yg-launcher-update; refusing an unsafe sync.'
+          }
+
+          $protectedTags = @($coTags | Where-Object { $_ -in $targetTagNames })
+          if ($protectedTags.Count -gt 0) {
+            throw "Sync would move published update tag(s): $($protectedTags -join ', '). Create each release tag on a distinct source commit."
+          }
+
+      - name: Synchronize update repository
+        id: sync
+        uses: ok-oldking/partial-sync-repo@bbd55c1dffbcc1292a12295d949e7807b35ea93e # master on 2026-08-15
+        with:
+          repos: |
+            https://etg227:${{ secrets.UPDATE_REPO_TOKEN }}@github.com/etg227/wuwa-yg-launcher-update.git
+          sync_list: 'deploy.txt'
+          tag: ${{ env.RELEASE_TAG }}
+          gitignore_file: '.update_repo_gitignore'
+          show_author: true
+
+  package:
+    name: 3 · Build installers
+    needs: synchronize
+    if: needs.synchronize.outputs.is_release == 'true'
+    runs-on: windows-latest
+
+    steps:
+      - name: Configure runner
+        shell: pwsh
+        run: |
+          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+          git config --global core.autocrlf false
+          git config --global core.eol lf
+          git config --global user.email "144003800+etg227@users.noreply.github.com"
+          git config --global user.name "etg227"
+
+      - name: Check out source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          submodules: true
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install -r requirements.txt
+          python -m pip install -r requirements-dev.txt
+
+      - name: Prepare release requirements
+        run: python -m ok.update.inline_ok_requirements --tag "$env:RELEASE_TAG"
+
+      - name: Reuse base executable
+        uses: ok-oldking/pyappify-action@227bbb9f989febc79f8c22fa2325d90d190d3d44 # master on 2026-08-15
+        if: env.BUILD_EXE == 'true' && env.USE_RELEASE != ''
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        with:
+          use_release: ${{ env.USE_RELEASE }}
+
+      - name: Build installers
+        uses: ok-oldking/pyappify-action@227bbb9f989febc79f8c22fa2325d90d190d3d44 # master on 2026-08-15
+        if: env.BUILD_EXE == 'true' && env.USE_RELEASE == ''
+
+      - name: Verify launcher output
+        if: env.BUILD_EXE == 'true' && env.USE_RELEASE == ''
+        shell: pwsh
+        run: |
+          $launchers = @(Get-ChildItem -Path pyappify_dist -Filter '*-online-setup.exe' -File)
+          if ($launchers.Count -ne 1) {
+            throw "Expected exactly one online launcher, found $($launchers.Count)."
+          }
+          Write-Host "Release launcher: $($launchers[0].Name)"
+
+      - name: Stage launcher
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: env.BUILD_EXE == 'true'
+        with:
+          name: release-assets
+          path: pyappify_dist/*-online-setup.exe
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: 4 · Publish
+    needs: [ synchronize, package ]
+    if: needs.synchronize.outputs.is_release == 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download release assets
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: release-assets
+          path: pyappify_dist
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          body: |
+            ### 更新日志 ${{ needs.synchronize.outputs.start_tag }} -> ${{ needs.synchronize.outputs.end_tag }}:
+              ${{ needs.synchronize.outputs.changes }}
+            ### 下载说明
+              * 下载 `wuwa-yg-win32-online-setup.exe` 启动器，安装与更新使用更新仓库 [wuwa-yg-launcher-update](https://github.com/etg227/wuwa-yg-launcher-update)。
+              * 启动器支持手动更新、自动更新至正式版和自动更新至预发布版。
+              * GitHub 自动显示的 `Source code` 压缩包不是 Windows 安装包。
+            ### 风险说明
+              本项目会模拟键盘和鼠标输入，可能被游戏运营方认定为违规第三方自动化工具。请阅读 README 并自行承担使用风险。
+          draft: false
+          prerelease: false
+          files: pyappify_dist/*-online-setup.exe
