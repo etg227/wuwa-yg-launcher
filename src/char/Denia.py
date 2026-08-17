@@ -1,10 +1,11 @@
 import time
 
 from src.Labels import Labels
+from src.char.AidaqianAxis import AidaqianAxis
 from src.char.BaseChar import BaseChar, SwitchPriority
 
 
-class Denia(BaseChar):
+class Denia(AidaqianAxis, BaseChar):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -17,6 +18,9 @@ class Denia(BaseChar):
         self.lib_1_casted = False
 
     def do_perform(self):
+        # 爱达千内置轴（AidaqianAxis）命中队伍时接管；不是该队伍时走原逻辑。
+        if self.axis_state() is not None:
+            return AidaqianAxis.do_perform(self)
         if self.has_intro:
             self.continues_normal_attack(2)
         elif self.lib_1_casted:
@@ -63,6 +67,10 @@ class Denia(BaseChar):
     #     else:
     #         return [False]
     def get_switch_priority(self, current_char=None, has_intro=False, target_low_con=False):
+        state = self.axis_state()
+        if state is not None:
+            owner, _ = self.axis_segments(state)[state["idx"]]
+            return SwitchPriority.MUST if owner == type(self).__name__ else SwitchPriority.NO
         if has_intro:
             from src.char.Aemeath import Aemeath
 

@@ -1,9 +1,10 @@
 import time
 
+from src.char.AidaqianAxis import AidaqianAxis
 from src.char.BaseChar import BaseChar
 
 
-class Aemeath(BaseChar):
+class Aemeath(AidaqianAxis, BaseChar):
     LIBERATION_COOLDOWN = 25
     LIBERATION_FORCE_DURATION = 30
     LIB2_PREPARE_WINDOW = 8
@@ -19,6 +20,9 @@ class Aemeath(BaseChar):
         return bool(self.task.find_one('aemeath_lib2', threshold=0.7))
 
     def do_perform(self):
+        # 爱达千内置轴（AidaqianAxis）命中队伍时接管；不是该队伍时走原逻辑。
+        if AidaqianAxis.axis_state(self) is not None:
+            return AidaqianAxis.do_perform(self)
         self.enhance_e_cast_this_turn = False
         self.lib2_cast_this_turn = False
         self.must_cast_lib2_this_turn = self.has_all_buff() and self.has_intro

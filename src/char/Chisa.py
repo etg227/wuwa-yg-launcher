@@ -1,9 +1,10 @@
 import time
 
+from src.char.AidaqianAxis import AidaqianAxis
 from src.char.BaseChar import BaseChar, CharType, get_default_buff_time
 
 
-class Chisa(BaseChar):
+class Chisa(AidaqianAxis, BaseChar):
     SUPPORT_ACTION_DURATION = 1.2
     SUPPORT_LONG_ACTION_DURATION = 10.0
     INTRO_NORMAL_ATTACK_DURATION = 2.0
@@ -22,6 +23,9 @@ class Chisa(BaseChar):
         return super().get_buff_time()
 
     def do_perform(self):
+        # 爱达千内置轴（AidaqianAxis）命中队伍时接管；不是该队伍时走原逻辑。
+        if self.axis_state() is not None:
+            return AidaqianAxis.do_perform(self)
         if self.is_dps_config():
             return self.do_dps_perform()
         return self.do_support_perform()
