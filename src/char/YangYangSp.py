@@ -1,10 +1,11 @@
 import time
 
 from ok import Logger
-from src.char.BaseChar import BaseChar
+from src.char.BaseChar import BaseChar, SwitchPriority
+from src.char.YangqianSuiAxis import YangqianSuiAxis
 
 
-class YangYangSp(BaseChar):
+class YangYangSp(YangqianSuiAxis, BaseChar):
     INTRO_PERFORM_DURATION = 8.0
     PERFORM_DURATION = 3.2
     LONG_PRESS_RELEASE_DELAY = 0.1
@@ -21,7 +22,17 @@ class YangYangSp(BaseChar):
     def __repr__(self):
         return self.DISPLAY_NAME
 
+    def get_switch_priority(self, current_char=None, has_intro=False, target_low_con=False):
+        state = self.yangqiansui_state()
+        if state is not None:
+            return SwitchPriority.MUST if self.yangqiansui_is_my_turn(state) else SwitchPriority.NO
+        return super().get_switch_priority(current_char, has_intro, target_low_con)
+
     def do_perform(self):
+        # 秧千穗轴命中时，不轮到自己出手就直接让位；轮到自己完全走原逻辑。
+        state = self.yangqiansui_state()
+        if state is not None and not self.yangqiansui_is_my_turn(state):
+            return self.switch_next_char()
         duration = self.INTRO_PERFORM_DURATION if self.has_intro else self.PERFORM_DURATION
         start = time.time()
         self.task.mouse_down()

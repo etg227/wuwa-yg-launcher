@@ -2,9 +2,10 @@ import time
 
 from src.char.AidaqianAxis import AidaqianAxis
 from src.char.BaseChar import BaseChar, CharType, SwitchPriority, get_default_buff_time
+from src.char.YangqianSuiAxis import YangqianSuiAxis
 
 
-class Chisa(AidaqianAxis, BaseChar):
+class Chisa(AidaqianAxis, YangqianSuiAxis, BaseChar):
     SUPPORT_ACTION_DURATION = 1.2
     SUPPORT_LONG_ACTION_DURATION = 10.0
     INTRO_NORMAL_ATTACK_DURATION = 2.0
@@ -23,18 +24,27 @@ class Chisa(AidaqianAxis, BaseChar):
         return super().get_buff_time()
 
     def do_perform(self):
-        # 爱达千轴命中时，不轮到自己出手就直接让位；轮到自己完全走原逻辑。
-        state = self.axis_state()
-        if state is not None and not self.axis_is_my_turn(state):
-            return self.switch_next_char()
+        # 千咲同时在两支队伍的轴里都有协同角色；命中哪支队伍就用哪边的顺序，
+        # 不轮到自己出手就直接让位，轮到自己（或都没命中）完全走原逻辑。
+        a_state = self.aidaqian_state()
+        if a_state is not None:
+            if not self.aidaqian_is_my_turn(a_state):
+                return self.switch_next_char()
+        else:
+            y_state = self.yangqiansui_state()
+            if y_state is not None and not self.yangqiansui_is_my_turn(y_state):
+                return self.switch_next_char()
         if self.is_dps_config():
             return self.do_dps_perform()
         return self.do_support_perform()
 
     def get_switch_priority(self, current_char=None, has_intro=False, target_low_con=False):
-        state = self.axis_state()
-        if state is not None:
-            return SwitchPriority.MUST if self.axis_is_my_turn(state) else SwitchPriority.NO
+        a_state = self.aidaqian_state()
+        if a_state is not None:
+            return SwitchPriority.MUST if self.aidaqian_is_my_turn(a_state) else SwitchPriority.NO
+        y_state = self.yangqiansui_state()
+        if y_state is not None:
+            return SwitchPriority.MUST if self.yangqiansui_is_my_turn(y_state) else SwitchPriority.NO
         return super().get_switch_priority(current_char, has_intro, target_low_con)
 
     def do_support_perform(self):

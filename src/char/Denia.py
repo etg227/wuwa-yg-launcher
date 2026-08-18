@@ -19,8 +19,8 @@ class Denia(AidaqianAxis, BaseChar):
 
     def do_perform(self):
         # 爱达千轴命中时，不轮到自己出手就直接让位；轮到自己完全走原逻辑。
-        axis_state = self.axis_state()
-        if axis_state is not None and not self.axis_is_my_turn(axis_state):
+        axis_state = self.aidaqian_state()
+        if axis_state is not None and not self.aidaqian_is_my_turn(axis_state):
             return self.switch_next_char()
         if self.has_intro:
             self.continues_normal_attack(2)
@@ -68,9 +68,9 @@ class Denia(AidaqianAxis, BaseChar):
     #     else:
     #         return [False]
     def get_switch_priority(self, current_char=None, has_intro=False, target_low_con=False):
-        axis_state = self.axis_state()
+        axis_state = self.aidaqian_state()
         if axis_state is not None:
-            return SwitchPriority.MUST if self.axis_is_my_turn(axis_state) else SwitchPriority.NO
+            return SwitchPriority.MUST if self.aidaqian_is_my_turn(axis_state) else SwitchPriority.NO
         if has_intro:
             from src.char.Aemeath import Aemeath
 

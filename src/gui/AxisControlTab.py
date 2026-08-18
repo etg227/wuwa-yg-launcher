@@ -3,7 +3,10 @@ from PySide6.QtWidgets import QCheckBox, QFrame, QHBoxLayout, QVBoxLayout, QWidg
 from qfluentwidgets import BodyLabel, CaptionLabel, FluentIcon, StrongBodyLabel
 
 from ok.gui.widget.CustomTab import CustomTab
-from src.char.AidaqianAxis import BUILTIN_AXES
+from src.char.AidaqianAxis import BUILTIN_AXES as AIDAQIAN_BUILTIN_AXES
+from src.char.YangqianSuiAxis import BUILTIN_AXIS_ENTRY as YANGQIANSUI_BUILTIN_AXIS
+
+BUILTIN_AXES = AIDAQIAN_BUILTIN_AXES + (YANGQIANSUI_BUILTIN_AXIS,)
 
 
 class AxisCard(QFrame):

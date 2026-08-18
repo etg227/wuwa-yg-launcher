@@ -47,7 +47,7 @@ class AidaqianAxis:
         from src.char.Denia import Denia
         return bool(task.has_char(Aemeath) and task.has_char(Denia) and task.has_char(Chisa))
 
-    def axis_state(self):
+    def aidaqian_state(self):
         if not self.in_aidaqian_team():
             return None
         task = self.task
@@ -58,24 +58,25 @@ class AidaqianAxis:
             task._aidaqian_axis = state
         return state
 
-    def axis_order(self, state):
+    def aidaqian_order(self, state):
         return OPENER_ORDER if state["phase"] == "opener" else LOOP_ORDER
 
-    def axis_is_my_turn(self, state):
-        return self.axis_order(state)[state["idx"]] == type(self).__name__
+    def aidaqian_is_my_turn(self, state):
+        return self.aidaqian_order(state)[state["idx"]] == type(self).__name__
 
-    # do_perform / get_switch_priority 故意不在这个 mixin 里实现：三个角色类
-    # 自己已经有原生的 do_perform / (Denia 的) get_switch_priority，多重继承下
-    # 让 mixin 代管这两个方法会让 super() 链路指向错误的下一个类。改为角色
-    # 类自己在方法开头调用 axis_state()/axis_is_my_turn() 这两个纯辅助方法。
+    # do_perform / get_switch_priority 故意不在这个 mixin 里实现：角色类自己
+    # 已经有原生的 do_perform / (Denia 的) get_switch_priority，多重继承下让
+    # mixin 代管这两个方法会让 super() 链路指向错误的下一个类，且千咲还同时
+    # 混入了 YangqianSuiAxis，两边队伍要分开判断。改为角色类自己在方法开头
+    # 调用 aidaqian_state()/aidaqian_is_my_turn() 这两个纯辅助方法。
 
     def switch_next_char(self, *args, **kwargs):
         # 角色自身逻辑判定"这轮打完了"时会调用这个方法；轮到的人才推进顺序指针，
         # 顺序指针推进必须先于父类真正切人，这样 get_switch_priority 才能在
         # 同一次切人里立刻看到下一个该上场的角色。
-        state = self.axis_state()
-        if state is not None and self.axis_is_my_turn(state):
-            order = self.axis_order(state)
+        state = self.aidaqian_state()
+        if state is not None and self.aidaqian_is_my_turn(state):
+            order = self.aidaqian_order(state)
             state["idx"] += 1
             if state["idx"] >= len(order):
                 state["phase"] = "loop"
