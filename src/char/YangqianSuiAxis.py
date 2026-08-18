@@ -28,13 +28,17 @@ LOOP_ORDER = (
 )
 
 # 椰果启动器页展示的内置轴登记表条目（追加进 AxisControlTab 引用的列表）。
+# char_config_switches 里的开关直接显示在这张卡片上，点了立即写入角色配置，
+# 和"角色设置"页是同一份配置，两边同步。
 BUILTIN_AXIS_ENTRY = {
     "name": "秧千穗轴",
     "team": "秧秧 / 千咲 / 穗穗",
-    "first": "秧秧先手在场；启动轴打完自动进入循环轴，直到战斗结束",
-    "description": "只协同出场顺序，技能释放完全由角色自身逻辑判断；穗穗是否有专武在"
-                   "\"角色设置\"里的\"Suisui Signature Weapon\"开关调整。"
+    "first": "穗穗先手；启动轴打完自动进入循环轴，直到战斗结束",
+    "description": "只协同出场顺序，技能释放完全由角色自身逻辑判断；"
                    "上阵该队伍并开启自动战斗即生效，无需额外操作。",
+    "char_config_switches": (
+        {"key": "Suisui Signature Weapon", "default": True, "label": "穗穗（Suisui）拥有专武"},
+    ),
 }
 
 
