@@ -15,16 +15,16 @@ target 完成实际切人；具体这一轮打多久、要不要进入千咲的�
 AXIS_TEAM = ("YangYangSp", "Chisa", "Suisui")
 
 # 出手顺序：只记录"轮到谁"，不记录具体按键，具体动作由角色自身逻辑决定。
-# 秧秧先手在场；启动轴打完自动进入循环轴，直到战斗结束。
+# 秧秧（1号位，蓝白）先手在场；启动轴打完自动进入循环轴，直到战斗结束。
 OPENER_ORDER = (
-    "Suisui", "YangYangSp", "Chisa", "YangYangSp", "Chisa",
-    "Suisui", "YangYangSp", "Chisa", "YangYangSp", "Chisa",
-    "Suisui", "YangYangSp", "Chisa",
+    "YangYangSp", "Suisui", "Chisa", "Suisui", "Chisa",
+    "YangYangSp", "Suisui", "Chisa", "Suisui", "Chisa",
+    "YangYangSp", "Suisui", "Chisa",
 )
 LOOP_ORDER = (
-    "YangYangSp", "Chisa", "YangYangSp", "Chisa", "Suisui",
-    "YangYangSp", "Chisa", "YangYangSp", "Chisa", "Suisui",
-    "YangYangSp", "Chisa",
+    "Suisui", "Chisa", "Suisui", "Chisa", "YangYangSp",
+    "Suisui", "Chisa", "Suisui", "Chisa", "YangYangSp",
+    "Suisui", "Chisa",
 )
 
 # 椰果启动器页展示的内置轴登记表条目（追加进 AxisControlTab 引用的列表）。
@@ -33,7 +33,7 @@ LOOP_ORDER = (
 BUILTIN_AXIS_ENTRY = {
     "name": "秧千穗轴",
     "team": "秧秧 / 千咲 / 穗穗",
-    "first": "穗穗先手；启动轴打完自动进入循环轴，直到战斗结束",
+    "first": "秧秧先手；启动轴打完自动进入循环轴，直到战斗结束",
     "description": "只协同出场顺序，技能释放完全由角色自身逻辑判断；"
                    "上阵该队伍并开启自动战斗即生效，无需额外操作。",
     "char_config_switches": (
@@ -77,6 +77,10 @@ class YangqianSuiAxis:
     # 角色类自己在方法开头调用 yangqiansui_state()/yangqiansui_is_my_turn()。
 
     def switch_next_char(self, *args, **kwargs):
+        # 角色自身逻辑判定"这轮打完了"时会调用这个方法；轮到的人才推进顺序指针。
+        # 战前框架自带的"没有治疗就先切治疗"安全机制会把当前角色切到穗穗，
+        # 但不需要为此单独处理：穗穗上场后 do_perform 发现不轮到自己会立刻
+        # 再让位，一步之内自然接上正确的秧秧先手，跟爱达千轴是同一个道理。
         state = self.yangqiansui_state()
         if state is not None and self.yangqiansui_is_my_turn(state):
             order = self.yangqiansui_order(state)
