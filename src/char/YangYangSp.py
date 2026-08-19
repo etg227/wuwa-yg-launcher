@@ -33,6 +33,11 @@ class YangYangSp(YangqianSuiAxis, BaseChar):
         state = self.yangqiansui_state()
         if state is not None and not self.yangqiansui_is_my_turn(state):
             return self.switch_next_char()
+        # 秧千穗轴启动轴第一段（开局）只有 E，没有 R；原生逻辑却是一有大招
+        # 能量就抢先放，开局大招如果已经充能会导致提前放大招、打乱轴的节奏。
+        # 只在这一段跳过大招判断，其余轮次（包括后续大招确实要放的轮次）
+        # 仍按原生逻辑正常判断释放。
+        skip_liberation = (state is not None and state["phase"] == "opener" and state["idx"] == 0)
         duration = self.INTRO_PERFORM_DURATION if self.has_intro else self.PERFORM_DURATION
         start = time.time()
         self.task.mouse_down()
@@ -40,7 +45,7 @@ class YangYangSp(YangqianSuiAxis, BaseChar):
         echo_used = False
         try:
             while self.time_elapsed_accounting_for_freeze(start) < duration:
-                if self.liberation_available():
+                if not skip_liberation and self.liberation_available():
                     self.logger.debug('liberation_available')
                     if not self.click_liberation(send_click=False, wait_if_cd_ready=0):
                         pass
