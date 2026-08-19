@@ -33,9 +33,10 @@ class Suisui(YangqianSuiAxis, BaseChar):
         if not self.should_heavy:
             self.should_heavy = self.has_intro
         self.perform_forte3_rotation()
-        if (axis_state is not None and axis_state["phase"] == "loop"
+        if (axis_state is not None and axis_state["phase"] == "loop" and axis_state["idx"] == 5
                 and not self.is_signature_weapon_config()):
-            # 没有专武时循环轴要多打一个 E（猫眼石攻略组秧千穗 25s 双羽轴标注）。
+            # 循环轴穗穗第二轮（aqr）没有专武时要多打一个 E，变成 aeqr
+            # （猫眼石攻略组秧千穗 25s 双羽轴标注）；她第一轮（下落a）不受影响。
             self.click_resonance()
         self.switch_next_char()
 

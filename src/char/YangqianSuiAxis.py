@@ -16,15 +16,18 @@ AXIS_TEAM = ("YangYangSp", "Chisa", "Suisui")
 
 # 出手顺序：只记录"轮到谁"，不记录具体按键，具体动作由角色自身逻辑决定。
 # 秧秧（1号位，蓝白）先手在场；启动轴打完自动进入循环轴，直到战斗结束。
+# 每个角色最后一轮（下标 len-1）是该角色的"变奏"大招轮，其余都是短促的
+# 单个技能/几下普攻就立刻切人，这个差异由 YangYangSp.py/Suisui.py 里按
+# 下标识别，不在这里处理。
 OPENER_ORDER = (
     "YangYangSp", "Suisui", "Chisa", "Suisui", "Chisa",
-    "YangYangSp", "Suisui", "Chisa", "Suisui", "Chisa",
-    "YangYangSp", "Suisui", "Chisa",
+    "YangYangSp", "Suisui", "Chisa", "YangYangSp", "Chisa",
+    "YangYangSp", "Chisa", "YangYangSp",
 )
 LOOP_ORDER = (
     "Suisui", "Chisa", "Suisui", "Chisa", "YangYangSp",
-    "Suisui", "Chisa", "Suisui", "Chisa", "YangYangSp",
-    "Suisui", "Chisa",
+    "Suisui", "Chisa", "YangYangSp", "Chisa", "YangYangSp",
+    "Chisa", "YangYangSp",
 )
 
 # 椰果启动器页展示的内置轴登记表条目（追加进 AxisControlTab 引用的列表）。
