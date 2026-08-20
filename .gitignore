@@ -73,3 +73,6 @@ working_images/
 repo/
 
 assets/result.json
+
+# Local motion-recognition datasets/models are intentionally not committed.
+training_data/
