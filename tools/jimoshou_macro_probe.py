@@ -6,6 +6,9 @@
 明确执行短验证段：
     py -3.12 tools/jimoshou_macro_probe.py --execute
 
+执行延长验证段：
+    py -3.12 tools/jimoshou_macro_probe.py --execute --extended
+
 验证目的只有一个：确认 PyDirectInput + 原始 down/up + 绝对 deadline 是否能比
 PostMessage/角色 helper 更接近鼠标驱动宏。这个脚本不会启动自动战斗，也不会循环。
 """
@@ -26,11 +29,11 @@ if str(ROOT) not in sys.path:
 from src.combat.RawInputTimeline import RawInputEvent, RawInputTimelineRunner, compile_raw_timeline
 
 
-# 视频 00:00 可见区域的连续原始事件。
+# 视频开头可见区域的连续原始事件。
 # 编辑器每一行的数字表示“本事件执行后，到下一事件的等待时间”。
 # 第一行只拍到了“2 抬起 78ms”，其前一行“2 按下”在画面上方；
 # 这里暂按同类切人键常见的 78ms 推定其按住时间。除此之外均按录像可见数字转录。
-JIMOSHO_VISIBLE_PROBE = (
+JIMOSHO_SHORT_PROBE = (
     RawInputEvent("key", "2", "down", 78, "2 按下（录像缺失行，暂推定 78ms）"),
     RawInputEvent("key", "2", "up", 78, "2 抬起"),
     RawInputEvent("key", "3", "down", 100, "3 按下"),
@@ -40,10 +43,41 @@ JIMOSHO_VISIBLE_PROBE = (
     RawInputEvent("mouse", "left", "down", 78, "左键按下 #2"),
     RawInputEvent("mouse", "left", "up", 550, "左键抬起 #2"),
     RawInputEvent("key", "r", "down", 100, "R 按下"),
-    # 录像这里是 R 抬起后等待 3000ms；probe 到 R 抬起即结束，因此不会真的多等 3 秒。
     RawInputEvent("key", "r", "up", 3000, "R 抬起"),
 )
 
+# 延长段继续按视频 f_10 / f_20 / f_25 / f_30 / f_35 可见行逐项转录。
+# 重点覆盖旧方案最容易开始漂移的区间：长等待、连续普攻、长按普攻、Q/E 和连续切人。
+JIMOSHO_EXTENDED_TAIL = (
+    RawInputEvent("mouse", "left", "down", 47, "R 后左键按下 #3"),
+    RawInputEvent("mouse", "left", "up", 450, "R 后左键抬起 #3"),
+    RawInputEvent("mouse", "left", "down", 62, "R 后左键按下 #4"),
+    RawInputEvent("mouse", "left", "up", 550, "R 后左键抬起 #4"),
+    RawInputEvent("mouse", "left", "down", 78, "R 后左键按下 #5"),
+    RawInputEvent("mouse", "left", "up", 200, "R 后左键抬起 #5"),
+    RawInputEvent("mouse", "left", "down", 500, "长按左键按下"),
+    RawInputEvent("mouse", "left", "up", 20, "长按左键抬起"),
+    RawInputEvent("key", "q", "down", 25, "Q 按下"),
+    RawInputEvent("key", "q", "up", 10, "Q 抬起"),
+    RawInputEvent("key", "e", "down", 25, "E 按下 #1"),
+    RawInputEvent("key", "e", "up", 10, "E 抬起 #1"),
+    RawInputEvent("key", "2", "down", 100, "2 按下 #2"),
+    RawInputEvent("key", "2", "up", 100, "2 抬起 #2"),
+    RawInputEvent("key", "1", "down", 100, "1 按下 #1"),
+    RawInputEvent("key", "1", "up", 200, "1 抬起 #1"),
+    RawInputEvent("key", "e", "down", 100, "E 按下 #2"),
+    RawInputEvent("key", "e", "up", 420, "E 抬起 #2"),
+    RawInputEvent("key", "3", "down", 50, "3 按下 #2"),
+    RawInputEvent("key", "3", "up", 50, "3 抬起 #2"),
+    RawInputEvent("mouse", "left", "down", 50, "切 3 后左键按下 #1"),
+    RawInputEvent("mouse", "left", "up", 450, "切 3 后左键抬起 #1"),
+    RawInputEvent("mouse", "left", "down", 50, "切 3 后左键按下 #2"),
+    RawInputEvent("mouse", "left", "up", 550, "切 3 后左键抬起 #2"),
+    RawInputEvent("mouse", "left", "down", 100, "切 3 后左键按下 #3"),
+    RawInputEvent("mouse", "left", "up", 50, "切 3 后左键抬起 #3"),
+)
+
+JIMOSHO_EXTENDED_PROBE = JIMOSHO_SHORT_PROBE + JIMOSHO_EXTENDED_TAIL
 GAME_PROCESS = "client-win64-shipping.exe"
 
 
@@ -125,10 +159,15 @@ def _wait_for_game_foreground(timeout_s: float = 20.0, stable_s: float = 0.25) -
     return False
 
 
-def _print_timeline() -> None:
-    print("忌莫守 PyDirect 输入层 probe（不会调用任何角色 helper）")
+def _timeline_last_ms(events) -> int:
+    schedule = compile_raw_timeline(events)
+    return schedule[-1].at_ms if schedule else 0
+
+
+def _print_timeline(events, name: str) -> None:
+    print(f"忌莫守 PyDirect 输入层 probe：{name}（不会调用任何角色 helper）")
     print("-" * 78)
-    for index, scheduled in enumerate(compile_raw_timeline(JIMOSHO_VISIBLE_PROBE), start=1):
+    for index, scheduled in enumerate(compile_raw_timeline(events), start=1):
         event = scheduled.event
         print(
             f"{index:02d}  t={scheduled.at_ms:4d} ms  "
@@ -136,10 +175,10 @@ def _print_timeline() -> None:
             f"after={event.delay_after_ms:4d} ms  {event.label}"
         )
     print("-" * 78)
-    print("最后一个实际输入是 t=1612 ms 的 R 抬起；其后的 3000ms 只是原宏下一段等待。")
+    print(f"最后一个实际输入位于 t={_timeline_last_ms(events)} ms；最后一行 after-delay 不会额外等待。")
 
 
-def _execute(countdown: int) -> int:
+def _execute(events, countdown: int, name: str) -> int:
     if sys.platform != "win32":
         print("--execute 只支持 Windows。", file=sys.stderr)
         return 2
@@ -147,8 +186,9 @@ def _execute(countdown: int) -> int:
         print("请用管理员 PowerShell / VS Code 启动验证，避免游戏高完整性级别拒绝输入。", file=sys.stderr)
         return 2
 
+    duration_s = _timeline_last_ms(events) / 1000
     input(
-        "\n即将执行约 1.6 秒的短输入验证。它不会自动循环。\n"
+        f"\n即将执行约 {duration_s:.1f} 秒的{name}输入验证。它不会自动循环。\n"
         "按 Enter 开始倒计时；倒计时结束后脚本会等待鸣潮真正成为前台再执行。"
     )
     for remaining in range(max(1, countdown), 0, -1):
@@ -164,7 +204,7 @@ def _execute(countdown: int) -> int:
         return 3
 
     backend = PyDirectRawBackend()
-    stats = RawInputTimelineRunner().run(JIMOSHO_VISIBLE_PROBE, backend)
+    stats = RawInputTimelineRunner().run(events, backend)
     print(
         f"probe 完成：{stats.event_count} 个原始事件，"
         f"平均绝对调度偏差 {stats.average_abs_drift_ms:.3f} ms，"
@@ -178,16 +218,23 @@ def main() -> int:
     parser.add_argument(
         "--execute",
         action="store_true",
-        help="真的向前台鸣潮发送短验证段；不加此参数只打印时间表",
+        help="真的向前台鸣潮发送验证段；不加此参数只打印时间表",
+    )
+    parser.add_argument(
+        "--extended",
+        action="store_true",
+        help="使用约 9 秒延长段；默认仍使用已验证通过的约 1.6 秒短段",
     )
     parser.add_argument("--countdown", type=int, default=5, help="开始等待鸣潮前台前的倒计时秒数")
     args = parser.parse_args()
 
-    _print_timeline()
+    events = JIMOSHO_EXTENDED_PROBE if args.extended else JIMOSHO_SHORT_PROBE
+    name = "延长段" if args.extended else "短段"
+    _print_timeline(events, name)
     if not args.execute:
         print("dry-run：没有发送任何按键。需要实测时显式加 --execute。")
         return 0
-    return _execute(args.countdown)
+    return _execute(events, args.countdown, name)
 
 
 if __name__ == "__main__":
