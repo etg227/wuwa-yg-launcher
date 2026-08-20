@@ -1,3 +1,5 @@
+import time
+
 """秧千穗 25s 双羽内置轴（秧秧 / 千咲 / 穗穗）。
 
 这支轴不能只靠“轮到谁上场”来复现。原图里大量使用拆普攻段、快速换人、
@@ -11,8 +13,9 @@
 - W：短按向前；下落a：空中普攻并等待落地
 - 变：该节点预期由变奏入场；只做入场同步，不主动伪造协奏/变奏
 
-目前没有攻略作者的毫秒宏时间戳，因此极限取消窗口先使用一组很短、集中在本
-文件的保守间隔。后续拿到宏时间戳时只需要替换这些间隔，不必再改轴结构。
+目前没有攻略作者的毫秒宏时间戳，因此极限取消窗口先使用一组集中在本
+文件的保守间隔，并在能可靠读取游戏状态的地方优先等待实际状态。后续拿到
+宏时间戳时只需要替换这些间隔，不必再改轴结构。
 """
 
 AXIS_TEAM = ("YangYangSp", "Chisa", "Suisui")
@@ -69,15 +72,20 @@ BUILTIN_AXIS_ENTRY = {
 class YangqianSuiAxis:
     """秧千穗动作轴 mixin：与三个角色的 BaseChar 子类多重继承使用。"""
 
-    # 没有宏毫秒时间戳时的第一版输入间隔。全部集中在这里便于实机微调。
-    AXIS_BASIC_GAP = 0.18
-    AXIS_SKILL_GAP = 0.12
-    AXIS_ECHO_GAP = 0.10
-    AXIS_F_GAP = 0.06
-    AXIS_LAST_INPUT_GAP = 0.06
+    # 没有宏毫秒时间戳时的第一版输入间隔。普攻按角色区分，避免把穗穗的
+    # 后续普攻输入提前塞进尚未开放的连段窗口。
+    AXIS_BASIC_GAP = 0.28
+    AXIS_SUISUI_BASIC_GAP = 0.42
+    AXIS_SKILL_GAP = 0.16
+    AXIS_ECHO_GAP = 0.12
+    AXIS_F_GAP = 0.08
+    AXIS_LAST_INPUT_GAP = 0.18
     AXIS_HEAVY_DURATION = 0.60
     AXIS_FORWARD_DURATION = 0.18
     AXIS_INTRO_TIMEOUT = 1.35
+    AXIS_AIRBORNE_TIMEOUT = 0.90
+    AXIS_AIRBORNE_POLL = 0.03
+    AXIS_FALL_LAND_GAP = 0.18
 
     def in_yangqiansui_team(self):
         task = self.task
@@ -124,10 +132,32 @@ class YangqianSuiAxis:
             f'YangqianSui {state["phase"]} step {state["idx"] + 1}: {char_name} {label}'
         )
         for pos, action in enumerate(actions):
-            self._yangqiansui_execute_action(action, is_last=(pos == len(actions) - 1))
+            next_action = actions[pos + 1] if pos + 1 < len(actions) else None
+            self._yangqiansui_execute_action(
+                action,
+                is_last=(pos == len(actions) - 1),
+                next_action=next_action,
+            )
         return self.switch_next_char()
 
-    def _yangqiansui_execute_action(self, action, *, is_last=False):
+    def _yangqiansui_basic_gap(self):
+        if type(self).__name__ == "Suisui":
+            return self.AXIS_SUISUI_BASIC_GAP
+        return self.AXIS_BASIC_GAP
+
+    def _yangqiansui_wait_airborne(self):
+        """E 接下落攻击时等待角色真正进入空中，避免下落 A 在起跳前被吃掉。"""
+        start = time.time()
+        while time.time() - start < self.AXIS_AIRBORNE_TIMEOUT:
+            self.task.next_frame()
+            if self.flying():
+                self.logger.debug('YangqianSui airborne confirmed before fall attack')
+                return True
+            self._yangqiansui_gap(self.AXIS_AIRBORNE_POLL)
+        self.logger.warning('YangqianSui airborne detection timed out before fall attack')
+        return False
+
+    def _yangqiansui_execute_action(self, action, *, is_last=False, next_action=None):
         """把攻略图中的一个动作转换成 OKWW 输入。"""
         if action == "intro":
             if self.has_intro:
@@ -139,14 +169,23 @@ class YangqianSuiAxis:
 
         if action == "a":
             self.click()
-            self._yangqiansui_gap(self.AXIS_LAST_INPUT_GAP if is_last else self.AXIS_BASIC_GAP)
+            self._yangqiansui_gap(
+                self.AXIS_LAST_INPUT_GAP if is_last else self._yangqiansui_basic_gap()
+            )
             return
 
         if action == "e":
             # 固定轴优先忠实发送输入，而不是让通用角色 AI 再决定技能是否值得放。
             self.send_resonance_key()
             self.record_resonance_use()
-            self._yangqiansui_gap(self.AXIS_LAST_INPUT_GAP if is_last else self.AXIS_SKILL_GAP)
+            if next_action == "fall_a":
+                # 穗穗这一段需要 E 起跳后再下落 A。固定 0.1s 过早会导致
+                # 下落攻击输入落在起跳前，因此这里优先用实际空中状态做同步点。
+                self._yangqiansui_wait_airborne()
+            else:
+                self._yangqiansui_gap(
+                    self.AXIS_LAST_INPUT_GAP if is_last else self.AXIS_SKILL_GAP
+                )
             return
 
         if action == "e_if_no_signature":
@@ -189,11 +228,12 @@ class YangqianSuiAxis:
             return
 
         if action == "fall_a":
-            # 图中明确写“下落a”：只按一次空中普攻，随后等待落地，不连续补 A。
+            # 下落攻击必须真正执行并落地后才能推进轴节点，否则下一角色的切人
+            # 输入会直接取消这一段动作。
             self.click()
-            self._yangqiansui_gap(0.08)
+            self._yangqiansui_gap(0.10)
             self.wait_down(click=False)
-            self._yangqiansui_gap(self.AXIS_LAST_INPUT_GAP)
+            self._yangqiansui_gap(self.AXIS_FALL_LAND_GAP)
             return
 
         raise ValueError(f"Unknown YangqianSui axis action: {action}")
