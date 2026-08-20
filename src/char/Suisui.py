@@ -26,18 +26,16 @@ class Suisui(YangqianSuiAxis, BaseChar):
         return bool(self.task and self.task.char_config.get('Suisui Signature Weapon', True))
 
     def do_perform(self):
-        # 秧千穗轴命中时，不轮到自己出手就直接让位；轮到自己完全走原逻辑。
+        # 秧千穗队伍直接执行攻略图当前节点；否则保留穗穗原生 Forte3 轮转。
         axis_state = self.yangqiansui_state()
-        if axis_state is not None and not self.yangqiansui_is_my_turn(axis_state):
-            return self.switch_next_char()
+        if axis_state is not None:
+            if not self.yangqiansui_is_my_turn(axis_state):
+                return self.switch_next_char()
+            return self.yangqiansui_perform_step(axis_state)
+
         if not self.should_heavy:
             self.should_heavy = self.has_intro
         self.perform_forte3_rotation()
-        if (axis_state is not None and axis_state["phase"] == "loop" and axis_state["idx"] == 5
-                and not self.is_signature_weapon_config()):
-            # 循环轴穗穗第二轮（aqr）没有专武时要多打一个 E，变成 aeqr
-            # （猫眼石攻略组秧千穗 25s 双羽轴标注）；她第一轮（下落a）不受影响。
-            self.click_resonance()
         self.switch_next_char()
 
     def get_switch_priority(self, current_char=None, has_intro=False, target_low_con=False):
