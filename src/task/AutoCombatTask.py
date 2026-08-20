@@ -11,6 +11,13 @@ logger = Logger.get_logger(__name__)
 class AutoCombatTask(BaseCombatTask, TriggerTask):
     owns_switch_healer_config = True
 
+    # 内置固定轴对起手角色和切人顺序有明确要求，不能执行 OKWW 默认的
+    # “开战先切治疗 / 战后切治疗”行为，否则会在第一个轴节点执行前破坏状态。
+    BUILTIN_AXIS_TEAMS = {
+        frozenset({"YangYangSp", "Chisa", "Suisui"}): "秧千穗轴",
+        frozenset({"Aemeath", "Denia", "Chisa"}): "爱达千轴",
+    }
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.default_config = {'_enabled': True}
@@ -46,6 +53,11 @@ class AutoCombatTask(BaseCombatTask, TriggerTask):
         self.char_features_warmed_up = True
         logger.info(f'warm_up_char_features loaded {len(char_names)} character templates')
 
+    def _builtin_axis_name(self):
+        """返回当前三人队对应的内置轴名称；未命中固定轴时返回 None。"""
+        recognized = frozenset(type(char).__name__ for char in self.chars if char is not None)
+        return self.BUILTIN_AXIS_TEAMS.get(recognized)
+
     def run(self):
         self.warm_up_char_features()
         ret = False
@@ -56,11 +68,25 @@ class AutoCombatTask(BaseCombatTask, TriggerTask):
             self.use_liberation = True
         combat_start = time.time()
         switched_to_healer = False
+
+        recognized_team = [type(char).__name__ if char is not None else "None" for char in self.chars]
+        builtin_axis_name = self._builtin_axis_name()
+        if builtin_axis_name:
+            logger.info(
+                f'AutoCombat detected builtin axis {builtin_axis_name}, team={recognized_team}; '
+                f'skip healer switch before/after combat'
+            )
+        else:
+            logger.info(f'AutoCombat recognized team={recognized_team}; no builtin axis matched')
+
         while self.in_combat():
             ret = True
             try:
                 if not switched_to_healer:
-                    self.switch_healer()
+                    # 固定轴必须从攻略指定的起手角色开始。原生 switch_healer() 会在
+                    # perform() 前把秧秧切走，导致 opener step 1 永远没有机会执行。
+                    if builtin_axis_name is None:
+                        self.switch_healer()
                     switched_to_healer = True
                 self.get_current_char().perform()
             except CharDeadException:
@@ -71,7 +97,9 @@ class AutoCombatTask(BaseCombatTask, TriggerTask):
                 break
         if ret:
             self.combat_end()
-            self.switch_healer()
+            # 战斗结束后同样不改动固定轴队伍的站场角色，避免下一场开局角色被提前改变。
+            if builtin_axis_name is None:
+                self.switch_healer()
         return ret
 
     def realm_perform(self):
