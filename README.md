@@ -13,7 +13,7 @@
 
 ## 项目定位
 
-椰果启动器由 Wuwa Pilot 精简而来，保留了 OKWW 的角色识别、战斗状态判断、技能状态判断与自动切人等基础能力，并把重点放在固定阵容的角色战斗逻辑和内置轴上。
+椰果启动器基于 OKWW 的角色识别、战斗状态判断、技能状态判断与自动切人等基础能力开发，重点面向固定阵容的角色战斗逻辑和内置轴。
 
 当前项目不提供外部轴文件导入或通用时间线播放器。轴直接写在角色代码与队伍轴逻辑中，由自动战斗框架根据当前角色、技能状态、协奏、变奏和队伍顺序执行。
 
@@ -133,11 +133,9 @@ src/gui/AxisControlTab.py
 
 ## 项目来源与致谢
 
-本项目由 [Wuwa Pilot](https://github.com/etg227/wuwa_pilot) 精简和调整而来。
+本项目基于 [OK-WW / ok-wuthering-waves](https://github.com/ok-oldking/ok-wuthering-waves) 开发，底层自动化框架来自 [OK-Script](https://ok-script.com)。
 
-Wuwa Pilot 基于 [OK-WW / ok-wuthering-waves](https://github.com/ok-oldking/ok-wuthering-waves) 开发，底层自动化框架来自 [OK-Script](https://ok-script.com)。
-
-感谢这些开源项目及其开发者提供的基础框架、角色逻辑和自动化能力。
+感谢 OK-WW 与 OK-Script 的开发者提供基础框架、角色逻辑和自动化能力。
 
 ## 使用过的开发工具与模型
 
