@@ -89,7 +89,8 @@ class YangqianSuiAxis:
     AXIS_INTRO_TIMEOUT = 1.35
     AXIS_AIRBORNE_TIMEOUT = 0.90
     AXIS_AIRBORNE_POLL = 0.03
-    AXIS_FALL_TRIGGER_GAP = 0.03
+    # 下落攻击的输入需要比普通 A 多一点起手时间；这里只等攻击真正启动，不等落地。
+    AXIS_FALL_TRIGGER_GAP = 0.12
 
     def in_yangqiansui_team(self):
         task = self.task
@@ -247,8 +248,8 @@ class YangqianSuiAxis:
             return
 
         if action == "fall_a":
-            # 下落攻击同样属于 A 接切人的换人取消：攻击输入一发出，只留极短
-            # 的触发窗口就切千咲，让穗穗继续留场完成下落攻击。
+            # 下落攻击也是换人取消，但不能像普通 A 一样只留 0.03 秒；先给游戏
+            # 足够的起手窗口，确认攻击能真正触发后立刻切千咲，不等待动画或落地。
             self.click()
             self._yangqiansui_gap(self.AXIS_FALL_TRIGGER_GAP)
             return
