@@ -24,7 +24,7 @@ AXIS_TEAM = ("YangYangSp", "Chisa", "Suisui")
 # step = (角色类名, 图中标签, 动作元组)
 OPENER_STEPS = (
     ("YangYangSp", "E", ("e",)),
-    ("Suisui", "a234E下落a", ("a", "a", "a", "e", "fall_a")),
+    ("Suisui", "a234E下落a", ("suisui_a234", "e", "fall_a")),
     ("Chisa", "aEa3", ("a", "e", "a")),
     ("Suisui", "a123", ("a", "a", "a")),
     ("Chisa", "a4", ("a",)),
@@ -76,6 +76,9 @@ class YangqianSuiAxis:
     # 连段内部的普攻间隔。只有当前节点最后一个 A 才使用 ATTACK_SWAP_GAP。
     AXIS_BASIC_GAP = 0.28
     AXIS_SUISUI_BASIC_GAP = 0.42
+    AXIS_SUISUI_A2_TO_A3_GAP = 0.75
+    AXIS_SUISUI_A3_TO_A4_GAP = 0.75
+    AXIS_SUISUI_A4_TO_E_GAP = 0.60
     AXIS_ATTACK_SWAP_GAP = 0.03
     AXIS_SKILL_GAP = 0.16
     AXIS_ECHO_GAP = 0.12
@@ -146,6 +149,15 @@ class YangqianSuiAxis:
             return self.AXIS_SUISUI_BASIC_GAP
         return self.AXIS_BASIC_GAP
 
+    def _yangqiansui_suisui_a234(self):
+        """启动轴专用：穗穗按 A2→A3→A4 节奏出手，并在 A4 后再交给 E。"""
+        self.click()
+        self._yangqiansui_gap(self.AXIS_SUISUI_A2_TO_A3_GAP)
+        self.click()
+        self._yangqiansui_gap(self.AXIS_SUISUI_A3_TO_A4_GAP)
+        self.click()
+        self._yangqiansui_gap(self.AXIS_SUISUI_A4_TO_E_GAP)
+
     def _yangqiansui_wait_airborne(self):
         """E 接下落攻击时等待角色真正进入空中，避免下落 A 在起跳前被吃掉。"""
         start = time.time()
@@ -166,6 +178,10 @@ class YangqianSuiAxis:
                 self.wait_intro(time_out=self.AXIS_INTRO_TIMEOUT, click=False)
             else:
                 self.logger.warning('YangqianSui expected intro but has_intro is false')
+            return
+
+        if action == "suisui_a234":
+            self._yangqiansui_suisui_a234()
             return
 
         if action == "a":
