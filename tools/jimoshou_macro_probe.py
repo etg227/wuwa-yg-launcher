@@ -95,6 +95,36 @@ def _foreground_process_name() -> str:
         return ""
 
 
+def _wait_for_game_foreground(timeout_s: float = 20.0, stable_s: float = 0.25) -> bool:
+    """等待鸣潮真正成为前台，并连续保持一小段时间后再开始 probe。"""
+
+    print(
+        f"倒计时结束。现在切回鸣潮；检测到 {GAME_PROCESS} 连续前台 "
+        f"{stable_s:.2f}s 后自动执行（最多等待 {timeout_s:.0f}s）。",
+        flush=True,
+    )
+    deadline = time.monotonic() + timeout_s
+    stable_since = None
+    last_reported = None
+
+    while time.monotonic() < deadline:
+        foreground = _foreground_process_name()
+        if foreground == GAME_PROCESS:
+            if stable_since is None:
+                stable_since = time.monotonic()
+                print("已检测到鸣潮前台，确认窗口稳定...", flush=True)
+            elif time.monotonic() - stable_since >= stable_s:
+                return True
+        else:
+            stable_since = None
+            if foreground != last_reported:
+                print(f"等待鸣潮前台；当前：{foreground or '<unknown>'}", flush=True)
+                last_reported = foreground
+        time.sleep(0.05)
+
+    return False
+
+
 def _print_timeline() -> None:
     print("忌莫守 PyDirect 输入层 probe（不会调用任何角色 helper）")
     print("-" * 78)
@@ -119,16 +149,16 @@ def _execute(countdown: int) -> int:
 
     input(
         "\n即将执行约 1.6 秒的短输入验证。它不会自动循环。\n"
-        "按 Enter 开始倒计时，然后立刻切回鸣潮；Ctrl+C 可在倒计时阶段取消。"
+        "按 Enter 开始倒计时；倒计时结束后脚本会等待鸣潮真正成为前台再执行。"
     )
     for remaining in range(max(1, countdown), 0, -1):
         print(f"{remaining}...", flush=True)
         time.sleep(1)
 
-    foreground = _foreground_process_name()
-    if foreground != GAME_PROCESS:
+    if not _wait_for_game_foreground():
+        foreground = _foreground_process_name()
         print(
-            f"已取消：当前前台进程是 {foreground or '<unknown>'}，不是 {GAME_PROCESS}。",
+            f"已取消：20 秒内没有检测到稳定的鸣潮前台；当前前台是 {foreground or '<unknown>'}。",
             file=sys.stderr,
         )
         return 3
@@ -150,7 +180,7 @@ def main() -> int:
         action="store_true",
         help="真的向前台鸣潮发送短验证段；不加此参数只打印时间表",
     )
-    parser.add_argument("--countdown", type=int, default=5, help="执行前切回游戏的倒计时秒数")
+    parser.add_argument("--countdown", type=int, default=5, help="开始等待鸣潮前台前的倒计时秒数")
     args = parser.parse_args()
 
     _print_timeline()
