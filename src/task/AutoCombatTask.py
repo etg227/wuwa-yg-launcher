@@ -55,6 +55,12 @@ class AutoCombatTask(BaseCombatTask, TriggerTask):
 
     def _builtin_axis_name(self):
         """返回当前三人队对应的内置轴名称；未命中固定轴时返回 None。"""
+        from src.char.JimoshouAxis import is_jimoshou_team
+
+        # 忌莫守依赖固定 1/2/3 槽位，不能只用 frozenset 判断队伍组成。
+        if is_jimoshou_team(self.chars):
+            return "忌莫守轴"
+
         recognized = frozenset(type(char).__name__ for char in self.chars if char is not None)
         return self.BUILTIN_AXIS_TEAMS.get(recognized)
 
@@ -79,16 +85,29 @@ class AutoCombatTask(BaseCombatTask, TriggerTask):
         else:
             logger.info(f'AutoCombat recognized team={recognized_team}; no builtin axis matched')
 
+        jimoshou_controller = None
+        if builtin_axis_name == "忌莫守轴":
+            from src.char.JimoshouAxis import JimoshouAxisController
+            jimoshou_controller = JimoshouAxisController(self)
+
         while self.in_combat():
             ret = True
             try:
                 if not switched_to_healer:
                     # 固定轴必须从攻略指定的起手角色开始。原生 switch_healer() 会在
-                    # perform() 前把秧秧切走，导致 opener step 1 永远没有机会执行。
+                    # perform() 前切走起手角色，因此内置轴一律跳过这层安全切人。
                     if builtin_axis_name is None:
                         self.switch_healer()
                     switched_to_healer = True
-                self.get_current_char().perform()
+
+                if jimoshou_controller is not None:
+                    # 忌莫守宏段必须完全隔离角色 do_perform/helper；每次调用执行一整轮，
+                    # 收尾确认回到 3 号位守岸人后才返回这里检查战斗是否继续。
+                    if not jimoshou_controller.run_cycle():
+                        logger.warning('Jimoshou axis stopped before cycle completion')
+                        break
+                else:
+                    self.get_current_char().perform()
             except CharDeadException:
                 self.log_error(f'Characters dead', notify=True)
                 break

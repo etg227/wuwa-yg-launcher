@@ -5,9 +5,10 @@ from qfluentwidgets import BodyLabel, CaptionLabel, FluentIcon, StrongBodyLabel
 from ok.gui.widget.CustomTab import CustomTab
 from ok.util.config import Config
 from src.char.AidaqianAxis import BUILTIN_AXES as AIDAQIAN_BUILTIN_AXES
+from src.char.JimoshouAxis import BUILTIN_AXIS_ENTRY as JIMOSHO_BUILTIN_AXIS
 from src.char.YangqianSuiAxis import BUILTIN_AXIS_ENTRY as YANGQIANSUI_BUILTIN_AXIS
 
-BUILTIN_AXES = AIDAQIAN_BUILTIN_AXES + (YANGQIANSUI_BUILTIN_AXIS,)
+BUILTIN_AXES = AIDAQIAN_BUILTIN_AXES + (YANGQIANSUI_BUILTIN_AXIS, JIMOSHO_BUILTIN_AXIS,)
 # 与 config.py 里 char_config_option 是同一份文件（按名字对应），角色代码通过
 # task.char_config 读取；这里直接读写同一份 Config，页面上勾选即时生效。
 CHAR_CONFIG_DEFAULTS = {
@@ -44,7 +45,7 @@ class AxisCard(QFrame):
 class AxisControlTab(CustomTab):
     """椰果启动器：内置轴库展示 + 自动战斗开关。
 
-    不支持用户导入轴或修改轴数据——轴以角色逻辑方式内置在角色代码里，
+    不支持用户导入轴或修改轴数据——轴以角色/队伍控制逻辑内置在源码中，
     上阵对应队伍并开启自动战斗即自动生效。想自己写轴请到“开发者模式”。
     """
 
@@ -56,7 +57,7 @@ class AxisControlTab(CustomTab):
         layout.setSpacing(16)
 
         intro = BodyLabel(
-            "椰果启动器的轴内置在角色自身的行动逻辑里，不支持导入或编辑轴文件；"
+            "椰果启动器的轴内置在角色或队伍控制逻辑中，不支持导入或编辑轴文件；"
             "上阵下方队伍并开启自动战斗即自动生效。想自己写轴，请前往“开发者模式”。",
             container,
         )
