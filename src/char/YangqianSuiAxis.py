@@ -1,44 +1,65 @@
-"""秧千穗内置轴（秧秧 / 千咲 / 穗穗）：纯粹的出场顺序协同。
+"""秧千穗 25s 双羽内置轴（秧秧 / 千咲 / 穗穗）。
 
-和爱达千轴（见 AidaqianAxis.py）同样的做法：不重写任何角色自身的技能释
-放逻辑，三个角色的 do_perform 完全是 okww 原生代码。这里只做一件事：
-按"猫眼石攻略组"秧千穗 25s 双羽轴整理出的出手顺序，在恰当的时候把 MUST
-优先级交给该上场的角色，让框架原生的 switch_next_char/_choose_switch_
-target 完成实际切人；具体这一轮打多久、要不要进入千咲的变奏状态，都由
-角色自己的状态判断决定，不在这里代为决定。
+这支轴不能只靠“轮到谁上场”来复现。原图里大量使用拆普攻段、快速换人、
+变奏后立刻接技能等操作，因此这里把启动轴与循环轴都记录成“角色 + 明确动作”
+节点。角色命中这支队伍时直接执行当前节点；不再让通用 do_perform 自己决定
+这一轮要打什么。
 
-穗穗（Suisui）是否持有专武是唯一需要额外代码的地方：没有专武时循环轴
-里要多打一个 E，通过角色配置里的"Suisui Signature Weapon"开关控制，
-在 Suisui.py 里读取。
+动作记号沿用攻略图：
+- a：一次普攻输入；a123 / a234 等在节点里展开成多次 a
+- E：共鸣技能；Q：声骸；R：共鸣解放；Z：重击；F：F 键
+- W：短按向前；下落a：空中普攻并等待落地
+- 变：该节点预期由变奏入场；只做入场同步，不主动伪造协奏/变奏
+
+目前没有攻略作者的毫秒宏时间戳，因此极限取消窗口先使用一组很短、集中在本
+文件的保守间隔。后续拿到宏时间戳时只需要替换这些间隔，不必再改轴结构。
 """
 
 AXIS_TEAM = ("YangYangSp", "Chisa", "Suisui")
 
-# 出手顺序：只记录"轮到谁"，不记录具体按键，具体动作由角色自身逻辑决定。
-# 秧秧（1号位，蓝白）先手在场；启动轴打完自动进入循环轴，直到战斗结束。
-# 每个角色最后一轮（下标 len-1）是该角色的"变奏"大招轮，其余都是短促的
-# 单个技能/几下普攻就立刻切人，这个差异由 YangYangSp.py/Suisui.py 里按
-# 下标识别，不在这里处理。
-OPENER_ORDER = (
-    "YangYangSp", "Suisui", "Chisa", "Suisui", "Chisa",
-    "YangYangSp", "Suisui", "Chisa", "YangYangSp", "Chisa",
-    "YangYangSp", "Chisa", "YangYangSp",
-)
-LOOP_ORDER = (
-    "Suisui", "Chisa", "Suisui", "Chisa", "YangYangSp",
-    "Suisui", "Chisa", "YangYangSp", "Chisa", "YangYangSp",
-    "Chisa", "YangYangSp",
+# step = (角色类名, 图中标签, 动作元组)
+OPENER_STEPS = (
+    ("YangYangSp", "E", ("e",)),
+    ("Suisui", "a234E下落a", ("a", "a", "a", "e", "fall_a")),
+    ("Chisa", "aEa3", ("a", "e", "a")),
+    ("Suisui", "a123", ("a", "a", "a")),
+    ("Chisa", "a4", ("a",)),
+    ("YangYangSp", "aE", ("a", "e")),
+    ("Suisui", "a4QR", ("a", "q", "r")),
+    ("Chisa", "变QRE", ("intro", "q", "r", "e")),
+    ("YangYangSp", "a123", ("a", "a", "a")),
+    ("Chisa", "Z", ("z",)),
+    ("YangYangSp", "a12Q", ("a", "a", "q")),
+    ("Chisa", "a", ("a",)),
+    ("YangYangSp", "变EZREFW EZ", ("intro", "e", "z", "r", "e", "f", "w", "e", "z")),
 )
 
-# 椰果启动器页展示的内置轴登记表条目（追加进 AxisControlTab 引用的列表）。
-# char_config_switches 里的开关直接显示在这张卡片上，点了立即写入角色配置，
-# 和"角色设置"页是同一份配置，两边同步。
+LOOP_STEPS = (
+    ("Suisui", "变下落a", ("intro", "fall_a")),
+    ("Chisa", "aEa3", ("a", "e", "a")),
+    ("Suisui", "a123", ("a", "a", "a")),
+    ("Chisa", "a4", ("a",)),
+    ("YangYangSp", "aE", ("a", "e")),
+    # 攻略图这一格标注条件多打 E；沿用现有配置：穗穗无专武时补 E。
+    ("Suisui", "a4(E条件)QR", ("a", "e_if_no_signature", "q", "r")),
+    ("Chisa", "变QRE", ("intro", "q", "r", "e")),
+    ("YangYangSp", "a123", ("a", "a", "a")),
+    ("Chisa", "Z", ("z",)),
+    ("YangYangSp", "a12Q", ("a", "a", "q")),
+    ("Chisa", "a", ("a",)),
+    ("YangYangSp", "变EZREFW EZ", ("intro", "e", "z", "r", "e", "f", "w", "e", "z")),
+)
+
+# 兼容可能还在引用旧常量的代码。
+OPENER_ORDER = tuple(step[0] for step in OPENER_STEPS)
+LOOP_ORDER = tuple(step[0] for step in LOOP_STEPS)
+
 BUILTIN_AXIS_ENTRY = {
     "name": "秧千穗轴",
     "team": "秧秧 / 千咲 / 穗穗",
-    "first": "秧秧先手；启动轴打完自动进入循环轴，直到战斗结束",
-    "description": "只协同出场顺序，技能释放完全由角色自身逻辑判断；"
-                   "上阵该队伍并开启自动战斗即生效，无需额外操作。",
+    "first": "秧秧先手；启动轴结束后自动进入循环轴，直到战斗结束",
+    "description": "按‘秧千穗25s双羽轴’逐节点执行明确动作，不再只协同出场顺序；"
+                   "上阵该队伍并开启自动战斗即生效。",
     "char_config_switches": (
         {"key": "Suisui Signature Weapon", "default": True, "label": "穗穗（Suisui）拥有专武"},
     ),
@@ -46,7 +67,17 @@ BUILTIN_AXIS_ENTRY = {
 
 
 class YangqianSuiAxis:
-    """秧千穗出场顺序协同 mixin：与 BaseChar 子类多重继承使用。"""
+    """秧千穗动作轴 mixin：与三个角色的 BaseChar 子类多重继承使用。"""
+
+    # 没有宏毫秒时间戳时的第一版输入间隔。全部集中在这里便于实机微调。
+    AXIS_BASIC_GAP = 0.18
+    AXIS_SKILL_GAP = 0.12
+    AXIS_ECHO_GAP = 0.10
+    AXIS_F_GAP = 0.06
+    AXIS_LAST_INPUT_GAP = 0.06
+    AXIS_HEAVY_DURATION = 0.60
+    AXIS_FORWARD_DURATION = 0.18
+    AXIS_INTRO_TIMEOUT = 1.35
 
     def in_yangqiansui_team(self):
         task = self.task
@@ -68,27 +99,118 @@ class YangqianSuiAxis:
             task._yangqiansui_axis = state
         return state
 
+    def yangqiansui_steps(self, state):
+        return OPENER_STEPS if state["phase"] == "opener" else LOOP_STEPS
+
     def yangqiansui_order(self, state):
-        return OPENER_ORDER if state["phase"] == "opener" else LOOP_ORDER
+        # 保留旧调用接口；新逻辑真正使用的是 yangqiansui_step。
+        return tuple(step[0] for step in self.yangqiansui_steps(state))
+
+    def yangqiansui_step(self, state):
+        steps = self.yangqiansui_steps(state)
+        idx = min(max(int(state.get("idx", 0)), 0), len(steps) - 1)
+        return steps[idx]
 
     def yangqiansui_is_my_turn(self, state):
-        return self.yangqiansui_order(state)[state["idx"]] == type(self).__name__
+        return self.yangqiansui_step(state)[0] == type(self).__name__
 
-    # do_perform / get_switch_priority 不在这个 mixin 里实现，原因同
-    # AidaqianAxis：多重继承下让 mixin 代管这两个方法会让 super() 链路指向
-    # 错误的下一个类，且千咲同时混入两个队伍的 mixin，两边必须分开判断。
-    # 角色类自己在方法开头调用 yangqiansui_state()/yangqiansui_is_my_turn()。
+    def yangqiansui_perform_step(self, state):
+        """执行当前攻略节点，然后推进节点并切到下一位指定角色。"""
+        char_name, label, actions = self.yangqiansui_step(state)
+        if char_name != type(self).__name__:
+            return self.switch_next_char()
+
+        self.logger.info(
+            f'YangqianSui {state["phase"]} step {state["idx"] + 1}: {char_name} {label}'
+        )
+        for pos, action in enumerate(actions):
+            self._yangqiansui_execute_action(action, is_last=(pos == len(actions) - 1))
+        return self.switch_next_char()
+
+    def _yangqiansui_execute_action(self, action, *, is_last=False):
+        """把攻略图中的一个动作转换成 OKWW 输入。"""
+        if action == "intro":
+            if self.has_intro:
+                # 不在变奏动画期间连点，避免把后续轴输入提前吃掉。
+                self.wait_intro(time_out=self.AXIS_INTRO_TIMEOUT, click=False)
+            else:
+                self.logger.warning('YangqianSui expected intro but has_intro is false')
+            return
+
+        if action == "a":
+            self.click()
+            self._yangqiansui_gap(self.AXIS_LAST_INPUT_GAP if is_last else self.AXIS_BASIC_GAP)
+            return
+
+        if action == "e":
+            # 固定轴优先忠实发送输入，而不是让通用角色 AI 再决定技能是否值得放。
+            self.send_resonance_key()
+            self.record_resonance_use()
+            self._yangqiansui_gap(self.AXIS_LAST_INPUT_GAP if is_last else self.AXIS_SKILL_GAP)
+            return
+
+        if action == "e_if_no_signature":
+            has_signature = True
+            checker = getattr(self, "is_signature_weapon_config", None)
+            if checker is not None:
+                has_signature = bool(checker())
+            if not has_signature:
+                self.send_resonance_key()
+                self.record_resonance_use()
+                self._yangqiansui_gap(self.AXIS_SKILL_GAP)
+            return
+
+        if action == "q":
+            self.send_echo_key()
+            self.record_echo_use()
+            self._yangqiansui_gap(self.AXIS_LAST_INPUT_GAP if is_last else self.AXIS_ECHO_GAP)
+            return
+
+        if action == "r":
+            # R 会隐藏队伍 UI；用原生 helper 等动画结束，但关闭自动 F，F 在图里有明确节点。
+            if not self.click_liberation(wait_if_cd_ready=0, click_f=False):
+                self.logger.warning('YangqianSui liberation input was not confirmed')
+            self._yangqiansui_gap(self.AXIS_LAST_INPUT_GAP)
+            return
+
+        if action == "z":
+            self.heavy_attack(self.AXIS_HEAVY_DURATION)
+            self._yangqiansui_gap(self.AXIS_LAST_INPUT_GAP)
+            return
+
+        if action == "f":
+            self.task.send_key('f')
+            self._yangqiansui_gap(self.AXIS_F_GAP)
+            return
+
+        if action == "w":
+            self.task.send_key('w', down_time=self.AXIS_FORWARD_DURATION)
+            self._yangqiansui_gap(self.AXIS_F_GAP)
+            return
+
+        if action == "fall_a":
+            # 图中明确写“下落a”：只按一次空中普攻，随后等待落地，不连续补 A。
+            self.click()
+            self._yangqiansui_gap(0.08)
+            self.wait_down(click=False)
+            self._yangqiansui_gap(self.AXIS_LAST_INPUT_GAP)
+            return
+
+        raise ValueError(f"Unknown YangqianSui axis action: {action}")
+
+    def _yangqiansui_gap(self, duration):
+        if duration > 0:
+            # 轴内的短间隔不因为大招/切人暂时隐藏目标 UI 而误判战斗结束。
+            self.sleep(duration, check_combat=False)
 
     def switch_next_char(self, *args, **kwargs):
-        # 角色自身逻辑判定"这轮打完了"时会调用这个方法；轮到的人才推进顺序指针。
-        # 战前框架自带的"没有治疗就先切治疗"安全机制会把当前角色切到穗穗，
-        # 但不需要为此单独处理：穗穗上场后 do_perform 发现不轮到自己会立刻
-        # 再让位，一步之内自然接上正确的秧秧先手，跟爱达千轴是同一个道理。
+        # 当前节点完整结束后先推进 state，让同一次原生 switch_next_char 立即看到
+        # 下一节点角色的 MUST 优先级。
         state = self.yangqiansui_state()
         if state is not None and self.yangqiansui_is_my_turn(state):
-            order = self.yangqiansui_order(state)
+            steps = self.yangqiansui_steps(state)
             state["idx"] += 1
-            if state["idx"] >= len(order):
+            if state["idx"] >= len(steps):
                 state["phase"] = "loop"
                 state["idx"] = 0
         return super().switch_next_char(*args, **kwargs)
