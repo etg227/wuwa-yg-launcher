@@ -34,6 +34,13 @@ JIYAN_ULT_DURATION_MS = 11000
 JIYAN_ULT_ATTACK_INTERVAL_MS = 110
 JIYAN_ULT_ATTACK_HOLD_MS = 20
 
+# 只把画面/战斗状态检查放进原宏已有的较长 idle 间隙，避免在 10~100ms
+# 的极限衔接里插入 next_frame / CV 检测。连续多次看不到敌方血条才认为战斗已结束，
+# 以免大招特效、遮挡或短暂丢锁导致单帧误停。
+COMBAT_PROBE_MIN_IDLE_MS = 300
+COMBAT_PROBE_MISS_LIMIT = 5
+JIYAN_ULT_COMBAT_PROBE_EVERY_CLICKS = 5
+
 # 用户补充：忌炎大招结束后需要 EE -> 2 莫特斐 -> 3 守岸人。
 # 视频末尾可见信息并不完整，因此第二次 E 与中间切 2 都按实战手法修正。
 FINISHER_SECOND_E_GAP_MS = 80
@@ -205,15 +212,19 @@ class JimoshouAxisController:
 
     def __init__(self, task):
         self.task = task
-        self.runner = RawInputTimelineRunner(should_abort=self._axis_should_abort)
+        self._combat_probe_misses = 0
+        self.runner = RawInputTimelineRunner(
+            should_abort=self._axis_should_abort,
+            after_event=self._after_raw_event,
+        )
         self.first_cycle = True
 
     def _axis_should_abort(self) -> bool:
         """宏段绕过了框架的 sleep/next_frame，停止信号必须在这里主动查。
 
-        覆盖 ok 框架的全部停止入口：程序退出（exit_event）、F10 停止/任务被
-        禁用（task._enabled）、任务或执行器暂停。返回 True 后 runner 抛
-        RawInputAborted 并释放所有按下的键。
+        快路径只检查不会做图像识别的停止入口：程序退出（exit_event）、F10 停止/
+        任务禁用（task._enabled）、任务或执行器暂停，以及框架已明确把 _in_combat
+        置为 False。返回 True 后 runner 抛 RawInputAborted 并释放所有按下的键。
         """
         task = self.task
         exit_check = getattr(task, "exit_is_set", None)
@@ -226,7 +237,63 @@ class JimoshouAxisController:
         executor = getattr(task, "executor", None)
         if executor is not None and getattr(executor, "paused", False):
             return True
+        if getattr(task, "_in_combat", True) is False:
+            return True
         return False
+
+    def _after_raw_event(self, event: RawInputEvent) -> None:
+        """只在抬起输入后的长 idle 刷新战斗状态；绝不插进 down→up 的保持时间。"""
+        if event.action != "up" or event.delay_after_ms < COMBAT_PROBE_MIN_IDLE_MS:
+            return
+        self._probe_combat_state()
+
+    def _probe_combat_state(self) -> None:
+        """非侵入式战斗存活探针：不锁敌、不发输入，只刷新画面并看血条。
+
+        单次看不到血条不代表战斗结束；只有连续多次长 idle / 大招输出探针都看不到
+        敌方血条才中止。这样能在怪已死亡时停止剩余宏，又避免把短暂特效遮挡当成结束。
+        """
+        if self._axis_should_abort():
+            raise RawInputAborted("停止请求已触发，中止忌莫守原始输入轴")
+
+        task = self.task
+        end_condition = getattr(task, "combat_end_condition", None)
+        if callable(end_condition):
+            try:
+                if end_condition():
+                    raise RawInputAborted("战斗结束条件已满足，中止忌莫守原始输入轴")
+            except RawInputAborted:
+                raise
+            except Exception as error:
+                logger.debug(f"Jimoshou combat_end_condition probe failed: {error}")
+
+        try:
+            task.next_frame()
+            scene = getattr(task, "scene", None)
+            scene_in_combat = getattr(scene, "in_combat", None)
+            if callable(scene_in_combat) and scene_in_combat() is False:
+                raise RawInputAborted("场景已明确退出战斗，中止忌莫守原始输入轴")
+            visible = bool(task.check_health_bar())
+        except RawInputAborted:
+            raise
+        except Exception as error:
+            # 探针自身失败时宁可保留当前轴，也不要因为一次 CV/帧异常误停。
+            logger.debug(f"Jimoshou combat visibility probe failed: {error}")
+            return
+
+        if visible:
+            self._combat_probe_misses = 0
+            return
+
+        self._combat_probe_misses += 1
+        logger.debug(
+            f"Jimoshou combat visibility miss "
+            f"{self._combat_probe_misses}/{COMBAT_PROBE_MISS_LIMIT}"
+        )
+        if self._combat_probe_misses >= COMBAT_PROBE_MISS_LIMIT:
+            raise RawInputAborted(
+                f"连续 {COMBAT_PROBE_MISS_LIMIT} 次未检测到敌方血条，按战斗结束处理中止忌莫守轴"
+            )
 
     def run_cycle(self) -> bool:
         if not is_jimoshou_team(self.task.chars):
@@ -241,6 +308,7 @@ class JimoshouAxisController:
             return False
 
         backend = _PyDirectRawBackend(hwnd)
+        self._combat_probe_misses = 0
 
         try:
             if self.first_cycle:
@@ -287,8 +355,8 @@ class JimoshouAxisController:
             self.first_cycle = False
             logger.info("Jimoshou cycle complete: ShoreKeeper ready for loop body")
             return True
-        except RawInputAborted:
-            logger.info("忌莫守轴已按停止请求中止，按下的输入已释放")
+        except RawInputAborted as error:
+            logger.info(f"忌莫守轴已中止：{error}；按下的输入已释放")
             return False
         except RuntimeError as error:
             logger.warning(f"忌莫守轴已中止：{error}")
@@ -305,7 +373,9 @@ class JimoshouAxisController:
         start = time.monotonic()
         while time.monotonic() - start < timeout:
             if self._axis_should_abort():
-                return False
+                # 这里不能 return False：调用方会把 False 解释成“切人没成功”并补按 3，
+                # 导致 F10/暂停后仍可能多发一次输入。
+                raise RawInputAborted("停止请求发生在槽位同步阶段")
             self.task.next_frame()
             in_team, current_index, _ = self.task.in_team()
             if in_team and current_index == expected_index:
@@ -319,11 +389,16 @@ class JimoshouAxisController:
             if char is not None:
                 char.is_current_char = (char.index == current_index)
 
-    @staticmethod
-    def _raw_key_tap(backend, code: str, hold_ms: int) -> None:
+    def _raw_key_tap(self, backend, code: str, hold_ms: int) -> None:
+        """补按也走同一条可中止等待；无论中途发生什么都优先释放按下的键。"""
+        if self._axis_should_abort():
+            raise RawInputAborted("补按前收到停止请求")
         backend.key_down(code)
-        time.sleep(hold_ms / 1000)
-        backend.key_up(code)
+        try:
+            target_ns = time.monotonic_ns() + hold_ms * 1_000_000
+            self._wait_until_ns(target_ns)
+        finally:
+            backend.key_up(code)
 
     def _wait_until_ns(self, target_ns: int) -> None:
         spin_window_ns = 1_000_000
@@ -365,6 +440,11 @@ class JimoshouAxisController:
             finally:
                 backend.mouse_up("left")
             click_index += 1
+
+            # 大招输出段没有 RawInputTimeline 的长 wait 回调，因此每约 550ms
+            # 借 90ms 左右的点击间隙做一次非侵入式战斗探针；绝对 click deadline 不变。
+            if click_index % JIYAN_ULT_COMBAT_PROBE_EVERY_CLICKS == 0:
+                self._probe_combat_state()
 
         self._wait_until_ns(end_ns)
         logger.info(f"Jimoshou Jiyan ult phase complete: raw clicks={click_index}")

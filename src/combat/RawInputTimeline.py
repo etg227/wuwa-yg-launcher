@@ -82,10 +82,17 @@ class RawInputTimelineRunner:
     # 在这个间隔内被响应；绝对 deadline 不受影响（每次循环重算剩余时间）。
     ABORT_POLL_S = 0.05
 
-    def __init__(self, clock_ns=time.monotonic_ns, sleep=time.sleep, should_abort=None):
+    def __init__(
+        self,
+        clock_ns=time.monotonic_ns,
+        sleep=time.sleep,
+        should_abort=None,
+        after_event=None,
+    ):
         self.clock_ns = clock_ns
         self.sleep = sleep
         self.should_abort = should_abort
+        self.after_event = after_event
 
     def run(self, events: Sequence[RawInputEvent], backend: RawInputBackend) -> RawInputTimingStats:
         schedule = compile_raw_timeline(events)
@@ -104,6 +111,10 @@ class RawInputTimelineRunner:
                 drift_ms = (self.clock_ns() - target_ns) / 1_000_000
                 drifts.append(abs(drift_ms))
                 self._execute(scheduled.event, backend, pressed_keys, pressed_mouse)
+                if self.after_event is not None:
+                    # 回调仍处于同一条绝对时间线上：适合把只应发生在长 idle
+                    # 区间里的轻量状态检查塞进已有等待，不需要重新计算相对 sleep。
+                    self.after_event(scheduled.event)
         finally:
             self._release_all(backend, pressed_keys, pressed_mouse)
 

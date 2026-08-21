@@ -1,6 +1,8 @@
 import unittest
 
 from src.char.JimoshouAxis import (
+    COMBAT_PROBE_MIN_IDLE_MS,
+    COMBAT_PROBE_MISS_LIMIT,
     FINISHER_MACRO,
     JIYAN_ULT_DURATION_MS,
     JimoshouAxisController,
@@ -8,12 +10,20 @@ from src.char.JimoshouAxis import (
     STARTUP_MACRO,
     is_jimoshou_team,
 )
-from src.combat.RawInputTimeline import RawInputAborted, compile_raw_timeline
+from src.combat.RawInputTimeline import RawInputAborted, RawInputEvent, compile_raw_timeline
 
 
 class _FakeExecutor:
     def __init__(self):
         self.paused = False
+
+
+class _FakeScene:
+    def __init__(self):
+        self.value = None
+
+    def in_combat(self):
+        return self.value
 
 
 class _FakeTask:
@@ -22,9 +32,36 @@ class _FakeTask:
         self.paused = False
         self.executor = _FakeExecutor()
         self._exit = False
+        self._in_combat = True
+        self.scene = _FakeScene()
+        self.combat_end_condition = None
+        self.health_bar_visible = True
+        self.next_frame_calls = 0
+        self.current_index = 0
+        self.chars = []
 
     def exit_is_set(self):
         return self._exit
+
+    def next_frame(self):
+        self.next_frame_calls += 1
+
+    def check_health_bar(self):
+        return self.health_bar_visible
+
+    def in_team(self):
+        return True, self.current_index, None
+
+
+class _RecordingBackend:
+    def __init__(self):
+        self.calls = []
+
+    def key_down(self, code):
+        self.calls.append(("key_down", code))
+
+    def key_up(self, code):
+        self.calls.append(("key_up", code))
 
 
 class TestJimoshouAxis(unittest.TestCase):
@@ -114,9 +151,15 @@ class TestAxisAbort(unittest.TestCase):
         controller.task.executor.paused = True
         self.assertTrue(controller._axis_should_abort())
 
-    def test_runner_is_wired_to_abort_check(self):
+    def test_known_out_of_combat_state_aborts(self):
+        controller = self._controller()
+        controller.task._in_combat = False
+        self.assertTrue(controller._axis_should_abort())
+
+    def test_runner_is_wired_to_abort_and_event_probe(self):
         controller = self._controller()
         self.assertEqual(controller.runner.should_abort, controller._axis_should_abort)
+        self.assertEqual(controller.runner.after_event, controller._after_raw_event)
 
     def test_ult_phase_wait_aborts_on_stop(self):
         import time
@@ -125,6 +168,83 @@ class TestAxisAbort(unittest.TestCase):
         controller.task._enabled = False
         with self.assertRaises(RawInputAborted):
             controller._wait_until_ns(time.monotonic_ns() + 10_000_000_000)
+
+    def test_wait_slot_raises_instead_of_returning_failed_sync_on_stop(self):
+        controller = self._controller()
+        controller.task._enabled = False
+        with self.assertRaises(RawInputAborted):
+            controller._wait_slot(controller.SLOT_SHOREKEEPER, 1.0)
+        self.assertEqual(controller.task.next_frame_calls, 0)
+
+    def test_raw_key_tap_releases_key_when_abort_happens_during_hold(self):
+        controller = self._controller()
+        backend = _RecordingBackend()
+
+        def abort_wait(_target_ns):
+            raise RawInputAborted("stop during hold")
+
+        controller._wait_until_ns = abort_wait
+        with self.assertRaises(RawInputAborted):
+            controller._raw_key_tap(backend, "3", 78)
+        self.assertEqual(backend.calls, [("key_down", "3"), ("key_up", "3")])
+
+
+class TestCombatEndProbe(unittest.TestCase):
+    def _controller(self):
+        return JimoshouAxisController(_FakeTask())
+
+    def test_after_event_only_probes_release_followed_by_long_idle(self):
+        controller = self._controller()
+        calls = []
+        controller._probe_combat_state = lambda: calls.append("probe")
+
+        controller._after_raw_event(
+            RawInputEvent("mouse", "left", "down", COMBAT_PROBE_MIN_IDLE_MS)
+        )
+        controller._after_raw_event(
+            RawInputEvent("mouse", "left", "up", COMBAT_PROBE_MIN_IDLE_MS - 1)
+        )
+        self.assertEqual(calls, [])
+
+        controller._after_raw_event(
+            RawInputEvent("mouse", "left", "up", COMBAT_PROBE_MIN_IDLE_MS)
+        )
+        self.assertEqual(calls, ["probe"])
+
+    def test_consecutive_health_bar_misses_abort_conservatively(self):
+        controller = self._controller()
+        controller.task.health_bar_visible = False
+
+        for _ in range(COMBAT_PROBE_MISS_LIMIT - 1):
+            controller._probe_combat_state()
+
+        with self.assertRaises(RawInputAborted):
+            controller._probe_combat_state()
+        self.assertEqual(controller.task.next_frame_calls, COMBAT_PROBE_MISS_LIMIT)
+
+    def test_visible_health_bar_resets_miss_streak(self):
+        controller = self._controller()
+        controller.task.health_bar_visible = False
+        controller._probe_combat_state()
+        controller._probe_combat_state()
+        self.assertEqual(controller._combat_probe_misses, 2)
+
+        controller.task.health_bar_visible = True
+        controller._probe_combat_state()
+        self.assertEqual(controller._combat_probe_misses, 0)
+
+    def test_explicit_scene_out_of_combat_aborts_immediately(self):
+        controller = self._controller()
+        controller.task.scene.value = False
+        with self.assertRaises(RawInputAborted):
+            controller._probe_combat_state()
+
+    def test_combat_end_condition_aborts_without_sending_input(self):
+        controller = self._controller()
+        controller.task.combat_end_condition = lambda: True
+        with self.assertRaises(RawInputAborted):
+            controller._probe_combat_state()
+        self.assertEqual(controller.task.next_frame_calls, 0)
 
 
 if __name__ == "__main__":

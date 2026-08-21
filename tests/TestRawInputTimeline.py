@@ -163,6 +163,51 @@ class TestRawInputTimeline(unittest.TestCase):
         )
         self.assertTrue(any(duration > 1.0 for duration in sleeps))
 
+    def test_after_event_callback_runs_inside_absolute_timeline(self):
+        # 状态探针如果只占用已有长 idle 的一小部分，不应把后续事件整体顺延。
+        events = (
+            RawInputEvent("key", "q", "down", 500),
+            RawInputEvent("key", "q", "up", 0),
+        )
+        clock = FakeClock()
+        seen = []
+
+        def after_event(event):
+            seen.append((event.code, event.action))
+            if event.delay_after_ms >= 500:
+                clock.sleep(0.1)
+
+        stats = RawInputTimelineRunner(
+            clock_ns=clock.clock_ns,
+            sleep=clock.sleep,
+            after_event=after_event,
+        ).run(events, FakeBackend())
+
+        self.assertEqual(seen, [("q", "down"), ("q", "up")])
+        self.assertLess(stats.max_abs_drift_ms, 1.0)
+
+    def test_after_event_abort_releases_pressed_input(self):
+        events = (
+            RawInputEvent("key", "e", "down", 500),
+            RawInputEvent("key", "e", "up", 0),
+        )
+        backend = FakeBackend()
+        clock = FakeClock()
+
+        def after_event(event):
+            if event.action == "down":
+                raise RawInputAborted("probe says combat ended")
+
+        runner = RawInputTimelineRunner(
+            clock_ns=clock.clock_ns,
+            sleep=clock.sleep,
+            after_event=after_event,
+        )
+        with self.assertRaises(RawInputAborted):
+            runner.run(events, backend)
+
+        self.assertEqual(backend.calls, [("key_down", "e"), ("key_up", "e")])
+
 
 if __name__ == "__main__":
     unittest.main()
