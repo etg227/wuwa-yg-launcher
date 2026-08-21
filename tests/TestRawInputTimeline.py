@@ -1,6 +1,11 @@
 import unittest
 
-from src.combat.RawInputTimeline import RawInputEvent, RawInputTimelineRunner, compile_raw_timeline
+from src.combat.RawInputTimeline import (
+    RawInputAborted,
+    RawInputEvent,
+    RawInputTimelineRunner,
+    compile_raw_timeline,
+)
 
 
 class FakeBackend:
@@ -81,6 +86,82 @@ class TestRawInputTimeline(unittest.TestCase):
             RawInputTimelineRunner(clock_ns=clock.clock_ns, sleep=clock.sleep).run(events, backend)
         # finally 会再次尝试释放仍被 runner 视为按下的 E。
         self.assertEqual(backend.calls[-1], ("key_up", "e"))
+
+    def test_abort_stops_timeline_and_releases_pressed_input(self):
+        # R 按下之后停止请求生效：runner 必须抛 RawInputAborted，
+        # 不再发送后续事件，并在退出前释放仍按住的 R。
+        aborted = {"flag": False}
+        events = (
+            RawInputEvent("key", "r", "down", 100),
+            RawInputEvent("key", "r", "up", 5000),
+            RawInputEvent("key", "e", "down", 20),
+            RawInputEvent("key", "e", "up", 0),
+        )
+
+        backend = FakeBackend()
+        clock = FakeClock()
+
+        original_key_down = backend.key_down
+
+        def key_down_then_abort(code):
+            original_key_down(code)
+            aborted["flag"] = True
+
+        backend.key_down = key_down_then_abort
+
+        runner = RawInputTimelineRunner(
+            clock_ns=clock.clock_ns,
+            sleep=clock.sleep,
+            should_abort=lambda: aborted["flag"],
+        )
+        with self.assertRaises(RawInputAborted):
+            runner.run(events, backend)
+
+        self.assertEqual(backend.calls[0], ("key_down", "r"))
+        self.assertEqual(backend.calls[-1], ("key_up", "r"))
+        self.assertNotIn(("key_down", "e"), backend.calls)
+
+    def test_abort_polling_caps_long_sleeps(self):
+        # 长等待必须被切成 ABORT_POLL_S 以内的片段，停止请求才不会等满整段。
+        sleeps = []
+
+        class PollClock(FakeClock):
+            def sleep(self, seconds):
+                sleeps.append(seconds)
+                super().sleep(seconds)
+
+        events = (
+            RawInputEvent("key", "q", "down", 3000),
+            RawInputEvent("key", "q", "up", 0),
+        )
+        clock = PollClock()
+        runner = RawInputTimelineRunner(
+            clock_ns=clock.clock_ns,
+            sleep=clock.sleep,
+            should_abort=lambda: False,
+        )
+        runner.run(events, FakeBackend())
+        self.assertTrue(sleeps)
+        self.assertLessEqual(max(sleeps), RawInputTimelineRunner.ABORT_POLL_S)
+
+    def test_no_abort_callback_keeps_single_long_sleep(self):
+        # 不传 should_abort 时保持原行为：一次 sleep 睡满剩余时间，不做轮询切分。
+        sleeps = []
+
+        class PollClock(FakeClock):
+            def sleep(self, seconds):
+                sleeps.append(seconds)
+                super().sleep(seconds)
+
+        events = (
+            RawInputEvent("key", "q", "down", 3000),
+            RawInputEvent("key", "q", "up", 0),
+        )
+        clock = PollClock()
+        RawInputTimelineRunner(clock_ns=clock.clock_ns, sleep=clock.sleep).run(
+            events, FakeBackend()
+        )
+        self.assertTrue(any(duration > 1.0 for duration in sleeps))
 
 
 if __name__ == "__main__":

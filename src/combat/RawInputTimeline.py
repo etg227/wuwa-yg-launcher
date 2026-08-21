@@ -48,6 +48,10 @@ class RawInputTimingStats:
     max_abs_drift_ms: float
 
 
+class RawInputAborted(Exception):
+    """外部停止请求（F10 停止 / 任务禁用 / 暂停 / 退出）中止了原始输入时间线。"""
+
+
 class RawInputBackend(Protocol):
     def key_down(self, code: str) -> None: ...
 
@@ -74,10 +78,14 @@ class RawInputTimelineRunner:
 
     # 最后约 1ms 用短自旋避免普通 sleep 的唤醒误差继续累积；宏段很短，CPU 开销可控。
     SPIN_WINDOW_NS = 1_000_000
+    # 提供 should_abort 时，长等待被切成不超过该长度的片段，保证停止请求最迟
+    # 在这个间隔内被响应；绝对 deadline 不受影响（每次循环重算剩余时间）。
+    ABORT_POLL_S = 0.05
 
-    def __init__(self, clock_ns=time.monotonic_ns, sleep=time.sleep):
+    def __init__(self, clock_ns=time.monotonic_ns, sleep=time.sleep, should_abort=None):
         self.clock_ns = clock_ns
         self.sleep = sleep
+        self.should_abort = should_abort
 
     def run(self, events: Sequence[RawInputEvent], backend: RawInputBackend) -> RawInputTimingStats:
         schedule = compile_raw_timeline(events)
@@ -107,11 +115,17 @@ class RawInputTimelineRunner:
 
     def _wait_until(self, target_ns: int) -> None:
         while True:
+            if self.should_abort is not None and self.should_abort():
+                # run() 的 finally 会释放仍按下的输入，这里只需要中断等待。
+                raise RawInputAborted("停止请求已触发，中止原始输入时间线")
             remaining_ns = target_ns - self.clock_ns()
             if remaining_ns <= 0:
                 return
             if remaining_ns > self.SPIN_WINDOW_NS:
-                self.sleep((remaining_ns - self.SPIN_WINDOW_NS) / 1_000_000_000)
+                sleep_s = (remaining_ns - self.SPIN_WINDOW_NS) / 1_000_000_000
+                if self.should_abort is not None:
+                    sleep_s = min(sleep_s, self.ABORT_POLL_S)
+                self.sleep(sleep_s)
                 continue
             # 短窗口直接自旋；不要调用 helper/next_frame，也不要重新计算相对 sleep。
 

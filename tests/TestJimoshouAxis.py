@@ -3,11 +3,28 @@ import unittest
 from src.char.JimoshouAxis import (
     FINISHER_MACRO,
     JIYAN_ULT_DURATION_MS,
+    JimoshouAxisController,
     LOOP_MACRO,
     STARTUP_MACRO,
     is_jimoshou_team,
 )
-from src.combat.RawInputTimeline import compile_raw_timeline
+from src.combat.RawInputTimeline import RawInputAborted, compile_raw_timeline
+
+
+class _FakeExecutor:
+    def __init__(self):
+        self.paused = False
+
+
+class _FakeTask:
+    def __init__(self):
+        self._enabled = True
+        self.paused = False
+        self.executor = _FakeExecutor()
+        self._exit = False
+
+    def exit_is_set(self):
+        return self._exit
 
 
 class TestJimoshouAxis(unittest.TestCase):
@@ -67,6 +84,47 @@ class TestJimoshouAxis(unittest.TestCase):
             if event.device == "key" and event.action == "down"
         ]
         self.assertEqual(["e", "e", "2", "3"], down_codes)
+
+
+class TestAxisAbort(unittest.TestCase):
+    """宏段绕过框架 sleep/next_frame，停止信号必须由控制器自己响应。"""
+
+    def _controller(self):
+        return JimoshouAxisController(_FakeTask())
+
+    def test_no_stop_signal_means_no_abort(self):
+        self.assertFalse(self._controller()._axis_should_abort())
+
+    def test_task_disabled_aborts(self):
+        controller = self._controller()
+        controller.task._enabled = False
+        self.assertTrue(controller._axis_should_abort())
+
+    def test_exit_event_aborts(self):
+        controller = self._controller()
+        controller.task._exit = True
+        self.assertTrue(controller._axis_should_abort())
+
+    def test_pause_aborts(self):
+        controller = self._controller()
+        controller.task.paused = True
+        self.assertTrue(controller._axis_should_abort())
+
+        controller = self._controller()
+        controller.task.executor.paused = True
+        self.assertTrue(controller._axis_should_abort())
+
+    def test_runner_is_wired_to_abort_check(self):
+        controller = self._controller()
+        self.assertEqual(controller.runner.should_abort, controller._axis_should_abort)
+
+    def test_ult_phase_wait_aborts_on_stop(self):
+        import time
+
+        controller = self._controller()
+        controller.task._enabled = False
+        with self.assertRaises(RawInputAborted):
+            controller._wait_until_ns(time.monotonic_ns() + 10_000_000_000)
 
 
 if __name__ == "__main__":
