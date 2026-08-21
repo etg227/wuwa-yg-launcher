@@ -74,5 +74,6 @@ repo/
 
 assets/result.json
 
-# Local motion-recognition datasets/models are intentionally not committed.
+# Legacy/local motion datasets may remain after the training repo split.
+# Keep them ignored here to prevent accidental commits while users migrate data.
 training_data/

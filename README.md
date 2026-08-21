@@ -131,6 +131,10 @@ src/gui/AxisControlTab.py
 - `src/char/` 中的角色类决定具体技能与输出逻辑。
 - 队伍专用轴通过共享状态控制当前阶段、节点和下一位角色。
 
+## 动作训练实验
+
+角色动作 cycle、phase、CHAIN_READY 等视频训练与离线验证代码已经迁移到独立仓库 [`etg227/wuwa-motion-training`](https://github.com/etg227/wuwa-motion-training)。本仓库不再维护 `training/`、训练数据或训练专属测试；启动器代码与训练实验保持独立。
+
 ## 项目来源与致谢
 
 本项目基于 [OK-WW / ok-wuthering-waves](https://github.com/ok-oldking/ok-wuthering-waves) 开发，底层自动化框架来自 [OK-Script](https://ok-script.com)。
