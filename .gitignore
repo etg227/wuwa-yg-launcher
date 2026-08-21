@@ -73,3 +73,7 @@ working_images/
 repo/
 
 assets/result.json
+
+# Legacy/local motion datasets may remain after the training repo split.
+# Keep them ignored here to prevent accidental commits while users migrate data.
+training_data/

@@ -28,34 +28,23 @@ class YangYangSp(YangqianSuiAxis, BaseChar):
             return SwitchPriority.MUST if self.yangqiansui_is_my_turn(state) else SwitchPriority.NO
         return super().get_switch_priority(current_char, has_intro, target_low_con)
 
-    # 秧千穗轴里，秧秧每一段（启动轴/循环轴）的最后一轮才是她的"变奏"大招轮
-    # （长招式，含 R）；其余轮次都很短（一个技能或几下普攻就立刻切人）。
-    SHORT_TURN_DURATION = 1.0
-
     def do_perform(self):
-        # 秧千穗轴命中时，不轮到自己出手就直接让位；轮到自己完全走原逻辑。
+        # 秧千穗队伍不再运行秧秧的通用自动战斗逻辑，而是执行攻略图当前节点。
         state = self.yangqiansui_state()
-        if state is not None and not self.yangqiansui_is_my_turn(state):
-            return self.switch_next_char()
-        is_big_turn = None
         if state is not None:
-            order = self.yangqiansui_order(state)
-            is_big_turn = state["idx"] == len(order) - 1
-        # 秧秧只在自己的"变奏"大招轮放 R；其余轮次原生逻辑一有大招能量就
-        # 抢先放，会打乱轴的节奏，所以跳过大招判断。
-        skip_liberation = state is not None and not is_big_turn
-        if state is not None and not is_big_turn:
-            # 短轮：一个技能或几下普攻就该立刻切人，不用原生的长驻场时长。
-            duration = self.SHORT_TURN_DURATION
-        else:
-            duration = self.INTRO_PERFORM_DURATION if self.has_intro else self.PERFORM_DURATION
+            if not self.yangqiansui_is_my_turn(state):
+                return self.switch_next_char()
+            return self.yangqiansui_perform_step(state)
+
+        # 非秧千穗队伍保持 OKWW 原生角色逻辑。
+        duration = self.INTRO_PERFORM_DURATION if self.has_intro else self.PERFORM_DURATION
         start = time.time()
         self.task.mouse_down()
         resonance_available = 0
         echo_used = False
         try:
             while self.time_elapsed_accounting_for_freeze(start) < duration:
-                if not skip_liberation and self.liberation_available():
+                if self.liberation_available():
                     self.logger.debug('liberation_available')
                     if not self.click_liberation(send_click=False, wait_if_cd_ready=0):
                         pass
@@ -76,7 +65,5 @@ class YangYangSp(YangqianSuiAxis, BaseChar):
                 self.sleep(0.05)
         finally:
             self.task.mouse_up()
-            # Let the released heavy attack settle before another character reads
-            # the shared long-action indicator.
             self.sleep(self.LONG_PRESS_RELEASE_DELAY, check_combat=False)
         self.switch_next_char()

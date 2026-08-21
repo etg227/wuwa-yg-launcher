@@ -24,16 +24,19 @@ class Chisa(AidaqianAxis, YangqianSuiAxis, BaseChar):
         return super().get_buff_time()
 
     def do_perform(self):
-        # 千咲同时在两支队伍的轴里都有协同角色；命中哪支队伍就用哪边的顺序，
-        # 不轮到自己出手就直接让位，轮到自己（或都没命中）完全走原逻辑。
+        # 千咲同时参与爱达千与秧千穗。爱达千保持原来的顺序协同；
+        # 命中秧千穗时改为执行攻略图的明确动作节点。
         a_state = self.aidaqian_state()
         if a_state is not None:
             if not self.aidaqian_is_my_turn(a_state):
                 return self.switch_next_char()
         else:
             y_state = self.yangqiansui_state()
-            if y_state is not None and not self.yangqiansui_is_my_turn(y_state):
-                return self.switch_next_char()
+            if y_state is not None:
+                if not self.yangqiansui_is_my_turn(y_state):
+                    return self.switch_next_char()
+                return self.yangqiansui_perform_step(y_state)
+
         if self.is_dps_config():
             return self.do_dps_perform()
         return self.do_support_perform()
