@@ -101,8 +101,8 @@ class AutoCombatTask(BaseCombatTask, TriggerTask):
                     switched_to_healer = True
 
                 if jimoshou_controller is not None:
-                    # 忌莫守宏段必须完全隔离角色 do_perform/helper；每次调用执行一整轮，
-                    # 收尾确认回到 3 号位守岸人后才返回这里检查战斗是否继续。
+                    # 忌莫守宏段必须完全隔离角色 do_perform/helper；首次从 1 号忌炎起手，
+                    # 循环收尾 EE→2→3 后由 controller 从守岸人的循环动作段继续。
                     if not jimoshou_controller.run_cycle():
                         logger.warning('Jimoshou axis stopped before cycle completion')
                         break

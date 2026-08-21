@@ -7,7 +7,8 @@ PyDirectInput 原始 key/mouse down/up + time.monotonic_ns 绝对 deadline，保
 
 运行约束：
 - 固定槽位：1 忌炎 / 2 莫特斐 / 3 守岸人；
-- 每轮从守岸人站场开始；
+- 首次开局默认 1 号位忌炎站场，第一步由宏切 2 号莫特斐，再切 3 号守岸人；
+- 循环收尾为忌炎 EE -> 2 莫特斐 -> 3 守岸人，下一轮从守岸人动作段继续；
 - 宏执行期间鸣潮必须保持前台；
 - PyDirect 输入需要与游戏相同或更高的完整性级别，通常需要管理员权限。
 """
@@ -33,17 +34,17 @@ JIYAN_ULT_DURATION_MS = 11000
 JIYAN_ULT_ATTACK_INTERVAL_MS = 110
 JIYAN_ULT_ATTACK_HOLD_MS = 20
 
-# 用户补充：忌炎大招结束后需要 EE -> 3 守岸人。
-# 视频末尾只显示一组 E，因此第二次 E 属于用户对实战手法的补充。
+# 用户补充：忌炎大招结束后需要 EE -> 2 莫特斐 -> 3 守岸人。
+# 视频末尾可见信息并不完整，因此第二次 E 与中间切 2 都按实战手法修正。
 FINISHER_SECOND_E_GAP_MS = 80
 
 BUILTIN_AXIS_ENTRY = {
     "name": "忌莫守轴",
     "team": "忌炎(1) / 莫特斐(2) / 守岸人(3)",
-    "first": "守岸人（3号位）站场；固定槽位 1/2/3",
+    "first": "忌炎（1号位）站场；固定槽位 1/2/3",
     "description": (
-        "使用已实测的 PyDirect 原始输入时间线执行启动宏；忌炎 R 后持续平 A，"
-        "大招输出阶段结束后 EE→3，并从守岸人重新开始下一轮。"
+        "首次由忌炎站场，先切莫特斐再切守岸人进入启动宏；忌炎 R 后持续平 A，"
+        "大招输出结束执行 EE→2→3，之后从守岸人的循环动作段继续。"
         "需要管理员权限且鸣潮保持前台。"
     ),
 }
@@ -64,7 +65,7 @@ def _mouse(hold_ms: int, wait_ms: int, label: str = "左键"):
     return _tap_events("mouse", "left", hold_ms, wait_ms, label)
 
 
-# 视频宏从第一段到忌炎最终 R 抬起。第一颗 2 的按下行没有拍进画面，
+# 首次启动从 1 号忌炎站场开始。视频开头第一颗 2 的按下行没有拍进画面，
 # 但短 probe 已用 78ms 实机验证正确，因此保留该推定值。
 #
 # 注意最后 R 抬起的 wait=11000 只是原宏的输出窗口；RawInputTimelineRunner
@@ -104,9 +105,15 @@ STARTUP_MACRO = (
     *_key("r", 78, JIYAN_ULT_DURATION_MS, "忌炎 R"),
 )
 
+# 循环收尾已经执行 EE -> 2 -> 3，因此下一轮已经处于“首次启动中完成 2 -> 3”
+# 之后的同一状态。循环不能再重放开头的 2 -> 3，否则会重复切莫特斐并破坏协奏节奏。
+LOOP_MACRO = STARTUP_MACRO[4:]
+
 FINISHER_MACRO = (
     *_key("e", 78, FINISHER_SECOND_E_GAP_MS, "忌炎收尾 E #1"),
     *_key("e", 78, 20, "忌炎收尾 E #2"),
+    # 2 -> 3 的相对间隔沿用已验证启动宏第一组切人的 78ms hold + 78ms wait。
+    *_key("2", 78, 78, "切莫特斐重启"),
     *_key("3", 78, 0, "切守岸人重启"),
 )
 
@@ -188,12 +195,15 @@ class _PyDirectRawBackend:
 class JimoshouAxisController:
     """由 AutoCombatTask 直接调用的队伍级控制器；宏段期间不进入角色 do_perform。"""
 
+    SLOT_JIYAN = 0
+    SLOT_MORTEFI = 1
     SLOT_SHOREKEEPER = 2
     SLOT_SYNC_TIMEOUT = 1.5
 
     def __init__(self, task):
         self.task = task
         self.runner = RawInputTimelineRunner()
+        self.first_cycle = True
 
     def run_cycle(self) -> bool:
         if not is_jimoshou_team(self.task.chars):
@@ -210,14 +220,27 @@ class JimoshouAxisController:
         backend = _PyDirectRawBackend(hwnd)
 
         try:
-            if not self._ensure_shorekeeper(backend):
-                logger.error("忌莫守轴无法同步到 3 号位守岸人，停止本轮")
-                return False
+            if self.first_cycle:
+                # 首次开局必须保留默认的 1 号忌炎站场。不能像旧实现一样先强制切 3，
+                # 否则 STARTUP_MACRO 的第一颗 2 就失去“忌炎 -> 莫特斐”的语义。
+                if not self._slot_is(self.SLOT_JIYAN):
+                    logger.error("忌莫守首次开局要求 1 号位忌炎站场；未主动补切，停止本轮")
+                    return False
+                cycle_macro = STARTUP_MACRO
+                cycle_name = "startup"
+            else:
+                # 上一轮 FINISHER 已经完成 EE -> 2 -> 3；此时正好对应首次启动
+                # 2 -> 3 之后的状态，所以循环从守岸人的动作段继续，跳过最前四个原始事件。
+                if not self._slot_is(self.SLOT_SHOREKEEPER):
+                    logger.error("忌莫守循环起点应为 3 号位守岸人；状态不同步，停止本轮")
+                    return False
+                cycle_macro = LOOP_MACRO
+                cycle_name = "loop"
 
-            logger.info("Jimoshou cycle start: raw startup macro")
-            startup_stats = self.runner.run(STARTUP_MACRO, backend)
+            logger.info(f"Jimoshou cycle start: raw {cycle_name} macro")
+            startup_stats = self.runner.run(cycle_macro, backend)
             logger.info(
-                f"Jimoshou startup complete: events={startup_stats.event_count} "
+                f"Jimoshou {cycle_name} macro complete: events={startup_stats.event_count} "
                 f"avg_drift={startup_stats.average_abs_drift_ms:.3f}ms "
                 f"max_drift={startup_stats.max_abs_drift_ms:.3f}ms"
             )
@@ -232,27 +255,25 @@ class JimoshouAxisController:
             )
 
             if not self._wait_slot(self.SLOT_SHOREKEEPER, self.SLOT_SYNC_TIMEOUT):
-                logger.warning("忌莫守收尾切 3 未确认；补按一次 3 后重新同步")
+                logger.warning("忌莫守收尾 EE→2→3 后未确认守岸人；补按一次 3 后重新同步")
                 self._raw_key_tap(backend, "3", 78)
                 if not self._wait_slot(self.SLOT_SHOREKEEPER, self.SLOT_SYNC_TIMEOUT):
                     logger.error("忌莫守轴无法确认守岸人重新站场，停止循环")
                     return False
 
-            logger.info("Jimoshou cycle complete: ShoreKeeper ready for next loop")
+            self.first_cycle = False
+            logger.info("Jimoshou cycle complete: ShoreKeeper ready for loop body")
             return True
         except RuntimeError as error:
             logger.warning(f"忌莫守轴已中止：{error}")
             return False
 
-    def _ensure_shorekeeper(self, backend) -> bool:
+    def _slot_is(self, expected_index: int) -> bool:
         in_team, current_index, _ = self.task.in_team()
-        if in_team and current_index == self.SLOT_SHOREKEEPER:
+        if in_team and current_index == expected_index:
             self._sync_current_flags(current_index)
             return True
-
-        logger.info("Jimoshou prepare: switch to slot 3 ShoreKeeper before startup")
-        self._raw_key_tap(backend, "3", 78)
-        return self._wait_slot(self.SLOT_SHOREKEEPER, self.SLOT_SYNC_TIMEOUT)
+        return False
 
     def _wait_slot(self, expected_index: int, timeout: float) -> bool:
         start = time.monotonic()
@@ -288,7 +309,7 @@ class JimoshouAxisController:
                 continue
 
     def _run_jiyan_ult_phase(self, backend) -> None:
-        """忌炎 R 后持续原始左键，11 秒 deadline 到点后立即进入 EE→3。"""
+        """忌炎 R 后持续原始左键，11 秒 deadline 到点后进入 EE→2→3。"""
 
         start_ns = time.monotonic_ns()
         end_ns = start_ns + JIYAN_ULT_DURATION_MS * 1_000_000
