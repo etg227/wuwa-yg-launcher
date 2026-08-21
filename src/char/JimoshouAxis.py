@@ -21,7 +21,7 @@ import time
 
 from ok import Logger
 
-from src.combat.RawInputTimeline import RawInputEvent, RawInputTimelineRunner
+from src.combat.RawInputTimeline import RawInputAborted, RawInputEvent, RawInputTimelineRunner
 
 logger = Logger.get_logger(__name__)
 
@@ -166,6 +166,9 @@ class _PyDirectRawBackend:
         import win32gui
 
         pydirectinput.PAUSE = 0
+        # 关闭 pydirectinput 的甩角急停（挂机时光标停在屏幕角会误触发）。
+        # 紧急停止由 JimoshouAxisController._axis_should_abort 提供：F10 停止、
+        # 任务禁用、暂停、程序退出都会在 50ms 内中止宏并释放按下的输入。
         pydirectinput.FAILSAFE = False
         self.pydirectinput = pydirectinput
         self.win32gui = win32gui
@@ -202,8 +205,28 @@ class JimoshouAxisController:
 
     def __init__(self, task):
         self.task = task
-        self.runner = RawInputTimelineRunner()
+        self.runner = RawInputTimelineRunner(should_abort=self._axis_should_abort)
         self.first_cycle = True
+
+    def _axis_should_abort(self) -> bool:
+        """宏段绕过了框架的 sleep/next_frame，停止信号必须在这里主动查。
+
+        覆盖 ok 框架的全部停止入口：程序退出（exit_event）、F10 停止/任务被
+        禁用（task._enabled）、任务或执行器暂停。返回 True 后 runner 抛
+        RawInputAborted 并释放所有按下的键。
+        """
+        task = self.task
+        exit_check = getattr(task, "exit_is_set", None)
+        if exit_check is not None and exit_check():
+            return True
+        if getattr(task, "_enabled", True) is False:
+            return True
+        if getattr(task, "paused", False):
+            return True
+        executor = getattr(task, "executor", None)
+        if executor is not None and getattr(executor, "paused", False):
+            return True
+        return False
 
     def run_cycle(self) -> bool:
         if not is_jimoshou_team(self.task.chars):
@@ -264,6 +287,9 @@ class JimoshouAxisController:
             self.first_cycle = False
             logger.info("Jimoshou cycle complete: ShoreKeeper ready for loop body")
             return True
+        except RawInputAborted:
+            logger.info("忌莫守轴已按停止请求中止，按下的输入已释放")
+            return False
         except RuntimeError as error:
             logger.warning(f"忌莫守轴已中止：{error}")
             return False
@@ -278,6 +304,8 @@ class JimoshouAxisController:
     def _wait_slot(self, expected_index: int, timeout: float) -> bool:
         start = time.monotonic()
         while time.monotonic() - start < timeout:
+            if self._axis_should_abort():
+                return False
             self.task.next_frame()
             in_team, current_index, _ = self.task.in_team()
             if in_team and current_index == expected_index:
@@ -297,15 +325,17 @@ class JimoshouAxisController:
         time.sleep(hold_ms / 1000)
         backend.key_up(code)
 
-    @staticmethod
-    def _wait_until_ns(target_ns: int) -> None:
+    def _wait_until_ns(self, target_ns: int) -> None:
         spin_window_ns = 1_000_000
+        abort_poll_s = RawInputTimelineRunner.ABORT_POLL_S
         while True:
+            if self._axis_should_abort():
+                raise RawInputAborted("停止请求已触发，中止忌炎大招输出阶段")
             remaining_ns = target_ns - time.monotonic_ns()
             if remaining_ns <= 0:
                 return
             if remaining_ns > spin_window_ns:
-                time.sleep((remaining_ns - spin_window_ns) / 1_000_000_000)
+                time.sleep(min(abort_poll_s, (remaining_ns - spin_window_ns) / 1_000_000_000))
                 continue
 
     def _run_jiyan_ult_phase(self, backend) -> None:
