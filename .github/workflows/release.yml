@@ -260,7 +260,7 @@ jobs:
         run: python -m ok.update.inline_ok_requirements --tag "$env:RELEASE_TAG"
 
       - name: Reuse base executable
-        uses: ok-oldking/pyappify-action@227bbb9f989febc79f8c22fa2325d90d190d3d44 # master on 2026-08-15
+        uses: ok-oldking/pyappify-action@c5cc8fe5c9bd5c732969018694a2645474c48b7e # master on 2026-08-15
         if: env.BUILD_EXE == 'true' && env.USE_RELEASE != ''
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -268,7 +268,7 @@ jobs:
           use_release: ${{ env.USE_RELEASE }}
 
       - name: Build installers
-        uses: ok-oldking/pyappify-action@227bbb9f989febc79f8c22fa2325d90d190d3d44 # master on 2026-08-15
+        uses: ok-oldking/pyappify-action@c5cc8fe5c9bd5c732969018694a2645474c48b7e # master on 2026-08-15
         if: env.BUILD_EXE == 'true' && env.USE_RELEASE == ''
 
       - name: Verify launcher output
